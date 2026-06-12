@@ -1,7 +1,7 @@
 {
   "name": "tokensand-agent-pack",
-  "version": "0.1.1",
-  "description": "Bring Tokens& Build Packets, perks, stack context, and proof workflows into Cursor.",
+  "version": "0.1.2",
+  "description": "Bring Tokens& Build Packets, perks, stack context, enterprise session insights, and proof workflows into Cursor.",
   "author": {
     "name": "tokens&",
     "email": "giovanni@tokensand.ai"
@@ -16,6 +16,7 @@
     "cursor",
     "build-packets",
     "developer-perks",
+    "enterprise-sessions",
     "adoption-proof"
   ]
 }

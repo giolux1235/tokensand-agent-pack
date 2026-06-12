@@ -1,6 +1,6 @@
 # Tokens& Agent Pack for Cursor
 
-This Cursor plugin packages Tokens& Build Packet guidance, builder perks, stack context, and proof workflow rules for coding-agent workflows.
+This Cursor plugin packages Tokens& Build Packet guidance, builder perks, enterprise session insight, stack context, and proof workflow rules for coding-agent workflows.
 
 ## Local Test
 
@@ -12,7 +12,7 @@ Restart Cursor or run `Developer: Reload Window`, then verify the skill and MCP 
 
 ## Marketplace Readiness
 
-The repository-level Cursor marketplace manifest lives at `.cursor-plugin/marketplace.json`. Cursor's marketplace review flow accepts public Git repositories from `https://cursor.com/marketplace/publish`.
+The repository-level Cursor marketplace manifest lives at `.cursor-plugin/marketplace.json`. Cursor's official marketplace review flow accepts Git repositories; submit from `https://cursor.com/marketplace/publish` when the public repo and package assets are ready.
 
 ## User Install
 
@@ -27,12 +27,38 @@ Manual MCP config:
       "command": "npx",
       "args": [
         "-y",
-        "https://tokensand.com/packages/dev-adoption-cli-0.1.4.tgz",
+        "https://tokensand.com/packages/dev-adoption-cli-0.1.5.tgz",
         "mcp",
         "serve",
         "--api",
         "https://tokensand.com"
       ]
+    }
+  }
+}
+```
+
+Enterprise MCP config:
+
+```json
+{
+  "mcpServers": {
+    "tokensand": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "https://tokensand.com/packages/dev-adoption-cli-0.1.5.tgz",
+        "mcp",
+        "serve",
+        "--api",
+        "https://tokensand.com",
+        "--mode",
+        "enterprise"
+      ],
+      "env": {
+        "DAI_MODE": "enterprise",
+        "DAI_ENTERPRISE_PROFILE": "redis"
+      }
     }
   }
 }
@@ -47,5 +73,5 @@ npx -y @dev-adoption/cli@latest mcp serve --api https://tokensand.com
 Claude Code uses the same MCP server:
 
 ```bash
-claude mcp add --transport stdio tokensand -- npx -y https://tokensand.com/packages/dev-adoption-cli-0.1.4.tgz mcp serve --api https://tokensand.com
+claude mcp add --transport stdio tokensand -- npx -y https://tokensand.com/packages/dev-adoption-cli-0.1.5.tgz mcp serve --api https://tokensand.com
 ```
