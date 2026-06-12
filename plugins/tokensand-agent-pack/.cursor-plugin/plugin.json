@@ -1,0 +1,21 @@
+{
+  "name": "tokensand-agent-pack",
+  "version": "0.1.1",
+  "description": "Bring Tokens& Build Packets, perks, stack context, and proof workflows into Cursor.",
+  "author": {
+    "name": "tokens&",
+    "email": "giovanni@tokensand.ai"
+  },
+  "homepage": "https://tokensand.com/agents/install",
+  "repository": "https://github.com/giolux1235/tokensand-agent-pack",
+  "license": "MIT",
+  "keywords": [
+    "tokensand",
+    "developer-tools",
+    "mcp",
+    "cursor",
+    "build-packets",
+    "developer-perks",
+    "adoption-proof"
+  ]
+}

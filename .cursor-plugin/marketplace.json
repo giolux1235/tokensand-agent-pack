@@ -1,0 +1,17 @@
+{
+  "name": "tokensand",
+  "owner": {
+    "name": "tokens&",
+    "email": "giovanni@tokensand.ai"
+  },
+  "metadata": {
+    "description": "Agent-native Tokens& plugins for stack decisions, builder offers, and adoption proof workflows."
+  },
+  "plugins": [
+    {
+      "name": "tokensand-agent-pack",
+      "source": "plugins/tokensand-agent-pack",
+      "description": "Bring Tokens& Build Packets, perks, stack context, and proof workflows into Cursor."
+    }
+  ]
+}
