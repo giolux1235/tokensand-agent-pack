@@ -1,6 +1,6 @@
 # Tokens& Agent Pack for Cursor
 
-This Cursor plugin packages Tokens& Build Packet guidance, builder perks, enterprise session insight, stack context, and proof workflow rules for coding-agent workflows.
+This Cursor plugin packages Tokens& Build Packet guidance, builder perks, enterprise session insight, stack context, proof workflow rules, and approval-only enterprise motion drafts for coding-agent workflows.
 
 ## Local Test
 
@@ -27,7 +27,7 @@ Manual MCP config:
       "command": "npx",
       "args": [
         "-y",
-        "https://tokensand.com/packages/dev-adoption-cli-0.1.8.tgz",
+        "@dev-adoption/cli@0.1.8",
         "mcp",
         "serve",
         "--api",
@@ -47,7 +47,7 @@ Enterprise MCP config:
       "command": "npx",
       "args": [
         "-y",
-        "https://tokensand.com/packages/dev-adoption-cli-0.1.8.tgz",
+        "@dev-adoption/cli@0.1.8",
         "mcp",
         "serve",
         "--api",
@@ -67,11 +67,11 @@ Enterprise MCP config:
 After npm publish, use:
 
 ```bash
-npx -y @dev-adoption/cli@latest mcp serve --api https://tokensand.com
+npx -y @dev-adoption/cli@0.1.8 mcp serve --api https://tokensand.com
 ```
 
 Claude Code uses the same MCP server:
 
 ```bash
-claude mcp add --transport stdio tokensand -- npx -y https://tokensand.com/packages/dev-adoption-cli-0.1.8.tgz mcp serve --api https://tokensand.com
+claude mcp add --transport stdio tokensand -- npx -y @dev-adoption/cli@0.1.8 mcp serve --api https://tokensand.com
 ```

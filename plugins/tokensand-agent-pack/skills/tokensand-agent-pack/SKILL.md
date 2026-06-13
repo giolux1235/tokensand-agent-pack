@@ -35,6 +35,7 @@ Public MCP tools work without a scoped token:
 - `get_adoption_rank` for public AgentRank/adoption evidence before choosing a stack.
 - `build_brief` for a combined best-API plan, cost driver summary, free credit/perk plan, adoption evidence, dashboard sync boundary, risk, and proof handoff.
 - `enterprise_session_brief` for enterprise session funnel analysis, cost-per-activation/proof math, ICP segment ranking, event/session strategy, dashboard handoff links, offer strategy, activation, retention, and proof-loop next actions.
+- `draft_enterprise_session_motion`, `draft_builder_invite_motion`, `draft_partner_onboarding_motion`, and `draft_adoption_proof_motion` for approval-only enterprise motion drafts.
 
 Private saved stacks, project context, and write-like actions require a scoped workflow token generated from Tokens& after sign-in.
 
@@ -45,7 +46,7 @@ Use MCP only when the user has configured:
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.8.tgz", "mcp", "serve", "--api", "https://tokensand.com"],
+      "args": ["-y", "@dev-adoption/cli@0.1.8", "mcp", "serve", "--api", "https://tokensand.com"],
       "env": {
         "DAI_TOKEN": "<scoped-token>"
       }
@@ -61,7 +62,7 @@ Enterprise context example:
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.8.tgz", "mcp", "serve", "--api", "https://tokensand.com", "--mode", "enterprise"],
+      "args": ["-y", "@dev-adoption/cli@0.1.8", "mcp", "serve", "--api", "https://tokensand.com", "--mode", "enterprise"],
       "env": {
         "DAI_MODE": "enterprise",
         "DAI_ENTERPRISE_PROFILE": "redis"
@@ -74,12 +75,14 @@ Enterprise context example:
 ## Operating Rules
 
 1. Ask for `build_brief` before implementation when the user is choosing stack, backend, auth, data, deployment, cost, credits, APIs, evals, or proof path. For customer-agent builds, require best APIs, available free credits/perks, cost drivers, and dashboard sync status.
-2. For enterprise operators, ask for session metrics, budget/spend if available, and any known ICP segment split; then call `enterprise_session_brief` with a profile before recommending offers, session format, ICP, or follow-up.
-3. Treat perks as opportunities, not guarantees, until the user claims or verifies the offer.
-4. Keep repo writes, public proof publishing, outbound customer/account actions, account exports, and offer changes approval-gated.
-5. Source-label adoption claims. Do not convert self-reported proof into verified adoption without first-party, public-source, consented, or aggregate-safe evidence.
-6. Prefer the user's current repo conventions over generic stack advice.
-7. If no private token is configured, call `build_brief` for builders or `enterprise_session_brief` for enterprise operators so the user still receives useful public/sample guidance.
+2. For enterprise operators, collapse the recommendation to one promise: create a tracked developer session, invite the right builders, onboard partner companies, and prove adoption.
+3. Ask for session metrics, budget/spend if available, and any known ICP segment split; then call `enterprise_session_brief` with a profile before recommending offers, session format, ICP, or follow-up.
+4. When the enterprise operator asks what to do next, call the approval-only motion draft tools. Drafts are useful in Cursor but do not create sessions, send invites, onboard partners, export accounts, change offers, or publish proof.
+5. Treat perks as opportunities, not guarantees, until the user claims or verifies the offer.
+6. Keep repo writes, public proof publishing, outbound customer/account actions, account exports, and offer changes approval-gated.
+7. Source-label adoption claims. Do not convert self-reported proof into verified adoption without first-party, public-source, consented, or aggregate-safe evidence.
+8. Prefer the user's current repo conventions over generic stack advice.
+9. If no private token is configured, call `build_brief` for builders or `enterprise_session_brief` for enterprise operators so the user still receives useful public/sample guidance.
 
 ## Expected Output
 
@@ -104,6 +107,7 @@ For enterprise operators, return a short session/adoption decision with:
 - recommended event/session format and cadence
 - offer/perk to seed next
 - event/proof definition
+- approval-only drafts for session, invite, partner onboarding, or proof motions when requested
 - whether the Codex/Cursor call persisted anything to Tokens& and what token/config path is required for a build to appear in the dashboard
 - activation and retention next actions
 - kill condition for the next 100 builders
