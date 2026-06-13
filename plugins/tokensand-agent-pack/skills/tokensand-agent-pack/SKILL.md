@@ -45,7 +45,7 @@ Use MCP only when the user has configured:
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.6.tgz", "mcp", "serve", "--api", "https://tokensand.com"],
+      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.7.tgz", "mcp", "serve", "--api", "https://tokensand.com"],
       "env": {
         "DAI_TOKEN": "<scoped-token>"
       }
@@ -61,7 +61,7 @@ Enterprise context example:
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.6.tgz", "mcp", "serve", "--api", "https://tokensand.com", "--mode", "enterprise"],
+      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.7.tgz", "mcp", "serve", "--api", "https://tokensand.com", "--mode", "enterprise"],
       "env": {
         "DAI_MODE": "enterprise",
         "DAI_ENTERPRISE_PROFILE": "redis"

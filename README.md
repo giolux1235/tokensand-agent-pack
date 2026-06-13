@@ -4,7 +4,7 @@ Cursor plugin for Tokens& builder and enterprise operator workflows.
 
 ## What It Adds
 
-- Tokens& MCP server configured through the production package at `https://tokensand.com/packages/dev-adoption-cli-0.1.6.tgz`
+- Tokens& MCP server configured through the production package at `https://tokensand.com/packages/dev-adoption-cli-0.1.7.tgz`
 - Public builder tools for stack search, public perks, AgentRank/adoption evidence, and Build Briefs
 - Enterprise session briefs for supplied or sample session metrics, budget/cost-per-proof math, ICP segment ranking, event/session strategy, dashboard handoff, activation bottlenecks, offer strategy, retention, and proof loops
 - Private builder context through `DAI_TOKEN` for saved stacks, Build Packets, project drafts, and proof publishing
