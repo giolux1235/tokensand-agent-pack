@@ -5,7 +5,7 @@ This Cursor plugin packages Tokens& Build Packet guidance, builder perks, enterp
 ## Local Test
 
 ```bash
-ln -s /absolute/path/to/tokensand-agent-pack/plugins/tokensand-agent-pack ~/.cursor/plugins/local/tokensand-agent-pack
+ln -s /absolute/path/to/directory_ai_tools/plugins/tokensand-cursor-plugin ~/.cursor/plugins/local/tokensand-agent-pack
 ```
 
 Restart Cursor or run `Developer: Reload Window`, then verify the skill and MCP server appear in Cursor.
@@ -27,7 +27,7 @@ Manual MCP config:
       "command": "npx",
       "args": [
         "-y",
-        "https://tokensand.com/packages/dev-adoption-cli-0.1.5.tgz",
+        "https://tokensand.com/packages/dev-adoption-cli-0.1.6.tgz",
         "mcp",
         "serve",
         "--api",
@@ -47,7 +47,7 @@ Enterprise MCP config:
       "command": "npx",
       "args": [
         "-y",
-        "https://tokensand.com/packages/dev-adoption-cli-0.1.5.tgz",
+        "https://tokensand.com/packages/dev-adoption-cli-0.1.6.tgz",
         "mcp",
         "serve",
         "--api",
@@ -73,5 +73,5 @@ npx -y @dev-adoption/cli@latest mcp serve --api https://tokensand.com
 Claude Code uses the same MCP server:
 
 ```bash
-claude mcp add --transport stdio tokensand -- npx -y https://tokensand.com/packages/dev-adoption-cli-0.1.5.tgz mcp serve --api https://tokensand.com
+claude mcp add --transport stdio tokensand -- npx -y https://tokensand.com/packages/dev-adoption-cli-0.1.6.tgz mcp serve --api https://tokensand.com
 ```

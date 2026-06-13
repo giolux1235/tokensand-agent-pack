@@ -34,7 +34,7 @@ Public MCP tools work without a scoped token:
 - `find_perks` for public builder credits, events, startup programs, and Tokens& starter-kit offers.
 - `get_adoption_rank` for public AgentRank/adoption evidence before choosing a stack.
 - `build_brief` for a combined stack, perk, adoption, risk, and proof handoff.
-- `enterprise_session_brief` for enterprise session funnel analysis, offer strategy, activation, retention, and proof-loop next actions.
+- `enterprise_session_brief` for enterprise session funnel analysis, cost-per-activation/proof math, ICP segment ranking, event/session strategy, dashboard handoff links, offer strategy, activation, retention, and proof-loop next actions.
 
 Private saved stacks, project context, and write-like actions require a scoped workflow token generated from Tokens& after sign-in.
 
@@ -45,7 +45,7 @@ Use MCP only when the user has configured:
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.5.tgz", "mcp", "serve", "--api", "https://tokensand.com"],
+      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.6.tgz", "mcp", "serve", "--api", "https://tokensand.com"],
       "env": {
         "DAI_TOKEN": "<scoped-token>"
       }
@@ -61,7 +61,7 @@ Enterprise context example:
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.5.tgz", "mcp", "serve", "--api", "https://tokensand.com", "--mode", "enterprise"],
+      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.6.tgz", "mcp", "serve", "--api", "https://tokensand.com", "--mode", "enterprise"],
       "env": {
         "DAI_MODE": "enterprise",
         "DAI_ENTERPRISE_PROFILE": "redis"
@@ -74,7 +74,7 @@ Enterprise context example:
 ## Operating Rules
 
 1. Ask for a Build Packet before implementation when the user is choosing stack, backend, auth, data, deployment, cost, evals, or proof path.
-2. For enterprise operators, ask for session metrics or call `enterprise_session_brief` with a profile before recommending offers or follow-up.
+2. For enterprise operators, ask for session metrics, budget/spend if available, and any known ICP segment split; then call `enterprise_session_brief` with a profile before recommending offers, session format, ICP, or follow-up.
 3. Treat perks as opportunities, not guarantees, until the user claims or verifies the offer.
 4. Keep repo writes, public proof publishing, outbound customer/account actions, account exports, and offer changes approval-gated.
 5. Source-label adoption claims. Do not convert self-reported proof into verified adoption without first-party, public-source, consented, or aggregate-safe evidence.
@@ -96,7 +96,11 @@ For enterprise operators, return a short session/adoption decision with:
 
 - data source: supplied metrics, public/sample model, or private workspace if explicitly credentialed
 - funnel bottleneck and numeric rates
+- cost source and cost per activation, retained builder, and proof project when budget is supplied or modelled
+- best ICP segment and why it should receive the next cohort
+- recommended event/session format and cadence
 - offer/perk to seed next
 - event/proof definition
+- whether the Codex/Cursor call persisted anything to Tokens& and what token/config path is required for a build to appear in the dashboard
 - activation and retention next actions
 - kill condition for the next 100 builders
