@@ -5,13 +5,13 @@
     "email": "giovanni@tokensand.ai"
   },
   "metadata": {
-    "description": "Agent-native Tokens& plugins for stack decisions, builder offers, enterprise cost/ICP/session briefs, and adoption proof workflows."
+    "description": "Agent-native Tokens& plugins for stack decisions, builder offers, API/cost/credit briefs, enterprise cost/ICP/session briefs, and adoption proof workflows."
   },
   "plugins": [
     {
       "name": "tokensand-agent-pack",
       "source": "plugins/tokensand-agent-pack",
-      "description": "Bring Tokens& Build Packets, perks, stack context, enterprise cost/ICP/session insights, and proof workflows into Cursor."
+      "description": "Bring Tokens& Build Packets, perks, stack context, API/cost/credit briefs, enterprise cost/ICP/session insights, and proof workflows into Cursor."
     }
   ]
 }

@@ -33,7 +33,7 @@ Public MCP tools work without a scoped token:
 - `search_tools` for stack/product suggestions by build intent.
 - `find_perks` for public builder credits, events, startup programs, and Tokens& starter-kit offers.
 - `get_adoption_rank` for public AgentRank/adoption evidence before choosing a stack.
-- `build_brief` for a combined stack, perk, adoption, risk, and proof handoff.
+- `build_brief` for a combined best-API plan, cost driver summary, free credit/perk plan, adoption evidence, dashboard sync boundary, risk, and proof handoff.
 - `enterprise_session_brief` for enterprise session funnel analysis, cost-per-activation/proof math, ICP segment ranking, event/session strategy, dashboard handoff links, offer strategy, activation, retention, and proof-loop next actions.
 
 Private saved stacks, project context, and write-like actions require a scoped workflow token generated from Tokens& after sign-in.
@@ -45,7 +45,7 @@ Use MCP only when the user has configured:
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.7.tgz", "mcp", "serve", "--api", "https://tokensand.com"],
+      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.8.tgz", "mcp", "serve", "--api", "https://tokensand.com"],
       "env": {
         "DAI_TOKEN": "<scoped-token>"
       }
@@ -61,7 +61,7 @@ Enterprise context example:
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.7.tgz", "mcp", "serve", "--api", "https://tokensand.com", "--mode", "enterprise"],
+      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.8.tgz", "mcp", "serve", "--api", "https://tokensand.com", "--mode", "enterprise"],
       "env": {
         "DAI_MODE": "enterprise",
         "DAI_ENTERPRISE_PROFILE": "redis"
@@ -73,7 +73,7 @@ Enterprise context example:
 
 ## Operating Rules
 
-1. Ask for a Build Packet before implementation when the user is choosing stack, backend, auth, data, deployment, cost, evals, or proof path.
+1. Ask for `build_brief` before implementation when the user is choosing stack, backend, auth, data, deployment, cost, credits, APIs, evals, or proof path. For customer-agent builds, require best APIs, available free credits/perks, cost drivers, and dashboard sync status.
 2. For enterprise operators, ask for session metrics, budget/spend if available, and any known ICP segment split; then call `enterprise_session_brief` with a profile before recommending offers, session format, ICP, or follow-up.
 3. Treat perks as opportunities, not guarantees, until the user claims or verifies the offer.
 4. Keep repo writes, public proof publishing, outbound customer/account actions, account exports, and offer changes approval-gated.
@@ -86,9 +86,12 @@ Enterprise context example:
 For builders, return a short build decision with:
 
 - recommended stack and alternatives
+- best APIs by role, especially support-system, handoff, runtime, and memory/retrieval APIs for customer agents
 - matched perks or missing supply
+- free credits/perks available and claim caveats
 - required env vars and docs
 - cost/safety/eval risks
+- whether the Codex/Cursor call persisted anything to Tokens& and what DAI_TOKEN + draft/publish path is required for the build to appear in the dashboard
 - next action inside the current coding agent
 - proof step that remains human-approved
 

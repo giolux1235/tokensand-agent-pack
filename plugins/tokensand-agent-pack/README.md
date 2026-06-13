@@ -27,7 +27,7 @@ Manual MCP config:
       "command": "npx",
       "args": [
         "-y",
-        "https://tokensand.com/packages/dev-adoption-cli-0.1.7.tgz",
+        "https://tokensand.com/packages/dev-adoption-cli-0.1.8.tgz",
         "mcp",
         "serve",
         "--api",
@@ -47,7 +47,7 @@ Enterprise MCP config:
       "command": "npx",
       "args": [
         "-y",
-        "https://tokensand.com/packages/dev-adoption-cli-0.1.7.tgz",
+        "https://tokensand.com/packages/dev-adoption-cli-0.1.8.tgz",
         "mcp",
         "serve",
         "--api",
@@ -73,5 +73,5 @@ npx -y @dev-adoption/cli@latest mcp serve --api https://tokensand.com
 Claude Code uses the same MCP server:
 
 ```bash
-claude mcp add --transport stdio tokensand -- npx -y https://tokensand.com/packages/dev-adoption-cli-0.1.7.tgz mcp serve --api https://tokensand.com
+claude mcp add --transport stdio tokensand -- npx -y https://tokensand.com/packages/dev-adoption-cli-0.1.8.tgz mcp serve --api https://tokensand.com
 ```
