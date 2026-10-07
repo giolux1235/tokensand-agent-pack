@@ -25,7 +25,7 @@ Save a private plan in the workbench at https://tokensand.com/dashboard?mode=dev
 
 The Cursor plugin includes MCP configuration. Reload Cursor and call `get_account_mode`; add a server manually only if Tokens& tools are unavailable. Use [the install page](https://tokensand.com/agents/install?mode=developer) for the Cursor install link or JSON config.
 
-Use the [versioned package](https://tokensand.com/packages/dev-adoption-cli-0.1.28.tgz); npm remains 0.1.12. [Manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json) · [OpenAPI](https://tokensand.com/openapi.json) · [credentials](https://tokensand.com/auth.md).
+Use the [versioned package](https://tokensand.com/packages/dev-adoption-cli-0.1.29.tgz); npm remains 0.1.12. [Manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json) · [OpenAPI](https://tokensand.com/openapi.json) · [credentials](https://tokensand.com/auth.md).
 
 Set `DAI_TOKEN` in the MCP environment for private builder context. Project-scoped tokens are read-only. Use a developer publishing token from https://tokensand.com/projects/new#editor-workflow for project or Agent Skill writes. Keep credentials out of prompts, public context, and committed config.
 

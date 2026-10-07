@@ -9,13 +9,13 @@ Use [Connect your agent](https://tokensand.com/agents/install?mode=developer), r
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.28.tgz", "mcp", "serve", "--api", "https://tokensand.com"]
+      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.29.tgz", "mcp", "serve", "--api", "https://tokensand.com"]
     }
   }
 }
 ```
 
-The reviewed website package is **0.1.28**. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.28` for the archive URL. Update the package and restart existing MCP sessions to use this release.
+The plugin is prepared for website package **0.1.29**; production verification is pending. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.29` for the archive URL. Update the package and restart existing MCP sessions to use this release.
 
 ## Check one useful task
 
