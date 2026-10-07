@@ -1,77 +1,38 @@
-# Tokens& Agent Pack for Cursor
+# Tokens& for Cursor
 
-This Cursor plugin packages Tokens& Build Packet guidance, builder perks, enterprise session insight, stack context, proof workflow rules, and approval-only enterprise motion drafts for coding-agent workflows.
+Use [Connect your agent](https://tokensand.com/agents/install?mode=developer), reload Cursor, then call `get_account_mode`. The plugin already includes MCP configuration; add it manually only if the tools are missing.
 
-## Local Test
-
-```bash
-ln -s /absolute/path/to/directory_ai_tools/plugins/tokensand-cursor-plugin ~/.cursor/plugins/local/tokensand-agent-pack
-```
-
-Restart Cursor or run `Developer: Reload Window`, then verify the skill and MCP server appear in Cursor.
-
-## Marketplace Readiness
-
-The repository-level Cursor marketplace manifest lives at `.cursor-plugin/marketplace.json`. Cursor's official marketplace review flow accepts Git repositories; submit from `https://cursor.com/marketplace/publish` when the public repo and package assets are ready.
-
-## User Install
-
-One-click install is generated at `https://tokensand.com/.well-known/tokensand-agent-pack.json` as a Cursor deeplink.
-
-Manual MCP config:
+## Manual setup
 
 ```json
 {
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": [
-        "-y",
-        "@dev-adoption/cli@0.1.8",
-        "mcp",
-        "serve",
-        "--api",
-        "https://tokensand.com"
-      ]
+      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.27.tgz", "mcp", "serve", "--api", "https://tokensand.com"]
     }
   }
 }
 ```
 
-Enterprise MCP config:
+The reviewed website package is **0.1.27**. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.27` for the archive URL. Update the package and restart existing MCP sessions to use this release.
 
-```json
-{
-  "mcpServers": {
-    "tokensand": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@dev-adoption/cli@0.1.8",
-        "mcp",
-        "serve",
-        "--api",
-        "https://tokensand.com",
-        "--mode",
-        "enterprise"
-      ],
-      "env": {
-        "DAI_MODE": "enterprise",
-        "DAI_ENTERPRISE_PROFILE": "redis"
-      }
-    }
-  }
-}
-```
+## Check one useful task
 
-After npm publish, use:
+Ask: **“Keep Next.js, Supabase auth and pgvector. Add streaming answers. Find only what's missing, with docs.”**
+
+The result should preserve the existing stack and identify the streaming integration. It is a build plan; model access, cost and a working implementation still need checking in your repo.
+
+Public lookups need no account. For private saved plans, configure a scoped `DAI_TOKEN` using [auth.md](https://tokensand.com/auth.md). Browser login is separate. Keep credentials out of committed configuration.
+
+Use `--mode public` for public-only access, including when credentials were saved previously. Switch an explicitly public command to `--mode developer` before using private context. Project-scoped tokens are read-only.
+
+For live enterprise reads, follow the [included skill](skills/tokensand-agent-pack/SKILL.md). A sample company profile does not authenticate a workspace or prove live outcomes.
+
+## Local plugin check
 
 ```bash
-npx -y @dev-adoption/cli@0.1.8 mcp serve --api https://tokensand.com
+ln -s /absolute/path/to/tokensand-agent-pack/plugins/tokensand-agent-pack ~/.cursor/plugins/local/tokensand-agent-pack
 ```
 
-Claude Code uses the same MCP server:
-
-```bash
-claude mcp add --transport stdio tokensand -- npx -y @dev-adoption/cli@0.1.8 mcp serve --api https://tokensand.com
-```
+Reload Cursor and verify that both the skill and MCP server appear. A repository or install link is not marketplace approval.

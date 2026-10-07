@@ -1,45 +1,26 @@
-# Tokens& Agent Pack
+# Tokens& Agent Pack for Cursor
 
-Cursor plugin for Tokens& builder and enterprise operator workflows.
-
-## What It Adds
-
-- Tokens& MCP server configured through the published npm package `@dev-adoption/cli@0.1.8`
-- Public builder tools for stack search, public perks, AgentRank/adoption evidence, and Build Briefs with best APIs, cost drivers, free credits/perks, and dashboard sync status
-- Enterprise session briefs for supplied or sample session metrics, budget/cost-per-proof math, ICP segment ranking, event/session strategy, dashboard handoff, activation bottlenecks, offer strategy, retention, and proof loops
-- Approval-only enterprise motion drafts for tracked sessions, builder invites, partner onboarding, and adoption proof
-- Private builder context through `DAI_TOKEN` for saved stacks, Build Packets, project drafts, and proof publishing
-- Explicit account-mode guidance so Cursor users know browser login is not automatically shared with MCP
-- Marketplace metadata for Cursor plugin review
+Keep working on the repository you already have. Tokens& helps your coding agent find tools and docs, check credit eligibility, and reopen a saved build plan.
 
 ## Install
 
-Use the Tokens& install page:
+Use [Connect your agent](https://tokensand.com/agents/install?mode=developer) for the Cursor install link. Reload Cursor, then ask:
 
-```text
-https://tokensand.com/agents/install
-```
+> Use Tokens& get_account_mode. Keep my current stack and help with the next task in this repo.
 
-Or install the MCP server directly from Cursor with:
+Public lookup needs no Tokens& account. Private saved plans require a scoped `DAI_TOKEN`; browser sign-in does not authenticate MCP. [Setup and credentials](https://tokensand.com/auth.md).
 
-```text
-https://tokensand.com/.well-known/tokensand-agent-pack.json
-```
+This plugin uses the verified website package **0.1.27**. The npm registry remains at **0.1.12**; `@dev-adoption/cli@0.1.27` is not published. Existing installations need an update and restart.
 
-Enterprise mode can be configured with:
+[Manual setup and verification](plugins/tokensand-agent-pack/README.md) · [Live package manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json)
 
-```text
-DAI_MODE=enterprise
-DAI_ENTERPRISE_PROFILE=redis
-```
+## What it does
 
-Private live enterprise tenant metrics require an enterprise-scoped token when Tokens& enables that issuer. Do not paste browser cookies into MCP config.
+- Find a missing tool and its docs without requiring a new stack.
+- Check offers and eligibility; lookup does not redeem credits.
+- Read an exact saved Build Packet after sign-in. Public project proof is optional.
+- Read authorized enterprise context separately; sample briefs do not establish live customer outcomes.
 
-## Structure
+## Maintaining this package
 
-```text
-.cursor-plugin/marketplace.json
-plugins/tokensand-agent-pack/.cursor-plugin/plugin.json
-plugins/tokensand-agent-pack/mcp.json
-plugins/tokensand-agent-pack/skills/tokensand-agent-pack/SKILL.md
-```
+The reviewed source is `plugins/tokensand-cursor-plugin` in the private application repository. Sync the MCP configuration and skill after verifying the live package manifest and an isolated public MCP replay. Preserve this repository's marketplace path and license. Update the plugin version so installed clients can detect the release. Source changes alone do not refresh an installed client.
