@@ -5,7 +5,7 @@ description: Use Tokens& for requested stack choices, perks, saved Build Packets
 
 # Tokens& Agent Pack
 
-Answer the current request. Reuse relevant context already available. Proceed with already authorized local repository changes; this skill adds no approval step for them.
+Use relevant existing context and continue authorized repository work; this skill adds no approval step.
 
 ## Choose one starting tool
 
@@ -13,6 +13,7 @@ Answer the current request. Reuse relevant context already available. Proceed wi
 | --- | --- |
 | Check connection or account mode | `get_account_mode`; browser login does not authenticate MCP. |
 | Choose tools | `search_tools`; source-linked public options. |
+| Find a task-specific skill | `find_agent_skills`; published sources, no installation. |
 | Find credits or offers | `find_perks`; discovery, not redemption. |
 | Plan a build | `build_brief`; stack, costs, perks, evidence. It does not save a plan. |
 | Resume private work | `get_context` to locate saved work; `get_build_packet` for its implementation plan. Requires `DAI_TOKEN`. |
@@ -24,7 +25,7 @@ Save a private plan in the workbench at https://tokensand.com/dashboard?mode=dev
 
 The Cursor plugin includes MCP configuration. Reload Cursor and call `get_account_mode`; add a server manually only if Tokens& tools are unavailable. Use [the install page](https://tokensand.com/agents/install?mode=developer) for the Cursor install link or JSON config.
 
-Use the [versioned package](https://tokensand.com/packages/dev-adoption-cli-0.1.27.tgz); npm remains 0.1.12. [Manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json) · [OpenAPI](https://tokensand.com/openapi.json) · [credentials](https://tokensand.com/auth.md).
+Use the [versioned package](https://tokensand.com/packages/dev-adoption-cli-0.1.28.tgz); npm remains 0.1.12. [Manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json) · [OpenAPI](https://tokensand.com/openapi.json) · [credentials](https://tokensand.com/auth.md).
 
 Set `DAI_TOKEN` in the MCP environment for private builder context. Project-scoped tokens are read-only. Use a developer publishing token from https://tokensand.com/projects/new#editor-workflow for project or Agent Skill writes. Keep credentials out of prompts, public context, and committed config.
 
@@ -34,7 +35,7 @@ For public-only use, set or replace the command argument with `--mode public`; t
 
 ## Use offers and skills
 
-Find related skills at https://tokensand.com/api/agent-skills?q=vendor&limit=5. Follow the selected source and repository instructions; a SKILL.md file may depend on the rest of its package.
+Use `find_agent_skills({query:"react",client:"Codex"})` for five task-relevant sources. Follow the complete package’s official instructions. Snapshot dates and declared compatibility are not installation tests.
 
 Use `find_perks(search:"Tavily")`; `toolId` requires a UUID, never a slug. Missing `search` or `get_account_mode`: update/restart the stale server. Native claims require browser authentication, not workflow tokens.
 
