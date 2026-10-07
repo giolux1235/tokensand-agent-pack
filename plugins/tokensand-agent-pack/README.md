@@ -15,7 +15,7 @@ Use [Connect your agent](https://tokensand.com/agents/install?mode=developer), r
 }
 ```
 
-The plugin is prepared for website package **0.1.29**; production verification is pending. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.29` for the archive URL. Update the package and restart existing MCP sessions to use this release.
+Website package **0.1.29** was verified on October 7, 2026 with the live manifest, archive hash and 12 production MCP checks. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.29` for the archive URL. Update the package and restart existing MCP sessions to use this release.
 
 ## Check one useful task
 
