@@ -10,7 +10,7 @@ Use [Connect your agent](https://tokensand.com/agents/install?mode=developer) fo
 
 Public lookup needs no Tokens& account. Private saved plans require a scoped `DAI_TOKEN`; browser sign-in does not authenticate MCP. [Setup and credentials](https://tokensand.com/auth.md).
 
-This candidate pins website package **0.1.30**. Publication is pending verification of the live manifest, exact archive bytes and a fresh public MCP replay. The npm registry remains at **0.1.12**; `@dev-adoption/cli@0.1.30` is not published. Existing installations need an update and restart after release.
+This plugin uses website package **0.1.30**, verified on October 7, 2026 with the live manifest, exact archive bytes, a fresh installation and six public MCP replays. The npm registry remains at **0.1.12**; `@dev-adoption/cli@0.1.30` is not published. Existing installations need an update and restart.
 
 [Manual setup and verification](plugins/tokensand-agent-pack/README.md) · [Live package manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json)
 

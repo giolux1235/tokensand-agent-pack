@@ -15,7 +15,7 @@ Use [Connect your agent](https://tokensand.com/agents/install?mode=developer), r
 }
 ```
 
-This candidate pins website package **0.1.30**; production verification and publication are pending. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.30` for the archive URL. After release, update the package and restart existing MCP sessions.
+Website package **0.1.30** was verified on October 7, 2026 with the live manifest, exact archive bytes, a fresh installation and six public MCP replays. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.30` for the archive URL. Update the package and restart existing MCP sessions to use this release.
 
 ## Check one useful task
 
