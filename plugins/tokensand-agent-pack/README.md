@@ -9,13 +9,13 @@ Use [Connect your agent](https://tokensand.com/agents/install?mode=developer), r
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.29.tgz", "mcp", "serve", "--api", "https://tokensand.com"]
+      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.30.tgz", "mcp", "serve", "--api", "https://tokensand.com"]
     }
   }
 }
 ```
 
-Website package **0.1.29** was verified on October 7, 2026 with the live manifest, archive hash and 12 production MCP checks. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.29` for the archive URL. Update the package and restart existing MCP sessions to use this release.
+This candidate pins website package **0.1.30**; production verification and publication are pending. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.30` for the archive URL. After release, update the package and restart existing MCP sessions.
 
 ## Check one useful task
 
