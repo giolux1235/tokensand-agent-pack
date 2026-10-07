@@ -14,12 +14,32 @@ This plugin uses the verified website package **0.1.27**. The npm registry remai
 
 [Manual setup and verification](plugins/tokensand-agent-pack/README.md) · [Live package manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json)
 
+Try the [public first-use example](examples/existing-supabase-tracker.md): keep an existing Supabase stack and get a sourced brief for a private project tracker, with the observed result and remaining implementation checks.
+
+## Install the skill in another coding agent
+
+The workflow instructions are also discoverable with the open [skills CLI](https://skills.sh/docs):
+
+```bash
+npx skills add giolux1235/tokensand-agent-pack --skill tokensand-agent-pack
+```
+
+Choose your supported agent when prompted. This installs the **skill instructions**, not the MCP server configuration. Connect Tokens& separately using your client's instructions on [Connect your agent](https://tokensand.com/agents/install), then verify `get_account_mode` before trying a task. The Cursor plugin bundles both components.
+
+The skills.sh leaderboard reflects real installs; a discoverable repository is not marketplace approval or evidence of product use.
+
 ## What it does
 
 - Find a missing tool and its docs without requiring a new stack.
 - Check offers and eligibility; lookup does not redeem credits.
 - Read an exact saved Build Packet after sign-in. Public project proof is optional.
 - Read authorized enterprise context separately; sample briefs do not establish live customer outcomes.
+
+## For DevRel teams
+
+Tokens& combines a [developer GTM platform](https://tokensand.com/platform) with managed workshops, hackathons and builder programmes. Use a concrete product task as the starting point, then measure first successful use and repeat use separately from registrations or submissions.
+
+The [Loop Engineering Hackathon gallery](https://loop-engineering-hackathon.devpost.com/project-gallery) lists **65 project submissions** (checked October 7, 2026). Explore the [Tokens&-hosted event](https://luma.com/loophack) and an [inspectable project submission](https://devpost.com/software/vigil-r1bpqc). Project descriptions are participant reports; these artifacts do not establish independently verified product usage, retention or sponsor ROI.
 
 ## Maintaining this package
 

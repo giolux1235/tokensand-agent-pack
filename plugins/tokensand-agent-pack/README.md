@@ -23,6 +23,8 @@ Ask: **“Keep Next.js, Supabase auth and pgvector. Add streaming answers. Find 
 
 The result should preserve the existing stack and identify the streaming integration. It is a build plan; model access, cost and a working implementation still need checking in your repo.
 
+For a reproduced public lookup with exact tool arguments, see [the existing-stack tracker example](../../examples/existing-supabase-tracker.md). It records what the returned brief established and what still needs implementation.
+
 Public lookups need no account. For private saved plans, configure a scoped `DAI_TOKEN` using [auth.md](https://tokensand.com/auth.md). Browser login is separate. Keep credentials out of committed configuration.
 
 Use `--mode public` for public-only access, including when credentials were saved previously. Switch an explicitly public command to `--mode developer` before using private context. Project-scoped tokens are read-only.
@@ -31,8 +33,13 @@ For live enterprise reads, follow the [included skill](skills/tokensand-agent-pa
 
 ## Local plugin check
 
+From the repository root, copy the plugin into Cursor's local plugin directory:
+
 ```bash
-ln -s /absolute/path/to/tokensand-agent-pack/plugins/tokensand-agent-pack ~/.cursor/plugins/local/tokensand-agent-pack
+mkdir -p ~/.cursor/plugins/local/tokensand-agent-pack
+cp -R plugins/tokensand-agent-pack/. ~/.cursor/plugins/local/tokensand-agent-pack/
 ```
 
-Reload Cursor and verify that both the skill and MCP server appear. A repository or install link is not marketplace approval.
+Use a real directory: [Cursor skips symlinks whose targets are outside its local plugin folder](https://cursor.com/docs/plugins#test-plugins-locally). Reload Cursor and verify that both the skill and MCP server appear in Customize, then call `get_account_mode`. A marketplace installation with the same name takes precedence over this local test copy. Refresh the copy when testing later changes.
+
+A repository or install link is not marketplace approval.
