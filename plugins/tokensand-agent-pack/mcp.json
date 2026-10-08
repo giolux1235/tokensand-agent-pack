@@ -4,7 +4,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "https://tokensand.com/packages/dev-adoption-cli-0.1.30.tgz",
+        "https://tokensand.com/packages/dev-adoption-cli-0.1.31.tgz",
         "mcp",
         "serve",
         "--api",
