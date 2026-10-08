@@ -9,19 +9,21 @@ Use [Connect your agent](https://tokensand.com/agents/install?mode=developer), r
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.33.tgz", "mcp", "serve", "--api", "https://tokensand.com"]
+      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.34.tgz", "mcp", "serve", "--api", "https://tokensand.com"]
     }
   }
 }
 ```
 
-Website package **0.1.33** is pinned by archive URL; check the live manifest before upgrading. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.33` for the archive URL. Update the package and restart existing MCP sessions to use this release.
+Website package **0.1.34** is pinned by archive URL; check the live manifest before upgrading. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.34` for the archive URL. Update the package and restart existing MCP sessions to use this release.
 
 ## Check one useful task
 
 Ask: **“Keep Next.js, Supabase auth and pgvector. Add streaming answers. Find only what's missing, with docs.”**
 
 The result should preserve the existing stack and identify the streaming integration. It is a build plan; model access, cost and a working implementation still need checking in your repo.
+
+For `build_brief`, put the complete task in `intent`; `query` is optional. Returned implementation examples are optional source code to inspect and test, not automatic execution.
 
 For a reproduced public lookup with exact tool arguments, see [the existing-stack tracker example](../../examples/existing-supabase-tracker.md). It records what the returned brief established and what still needs implementation.
 

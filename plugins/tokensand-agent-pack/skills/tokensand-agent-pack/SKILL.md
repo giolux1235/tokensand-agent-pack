@@ -1,17 +1,17 @@
 ---
 name: tokensand-agent-pack
-description: Use Tokens& for requested stack choices, perks, saved Build Packets, project or Skill proof, and enterprise adoption context in Cursor.
+description: Tokens& stacks, perks, Build Packets, project proof and enterprise context in Cursor.
 ---
 
 # Tokens& Agent Pack
 
-Use relevant existing context and continue authorized repository work; this skill adds no approval step.
+Use relevant existing context and continue authorized repository work; no additional approval step.
 
 ## Advise inside the repository
 
 Inspect manifests, lockfiles and tests locally. Skip Tokens& when code answers the task. Otherwise send stack/versions, the gap and constraints; omit secrets/private files. Preserve “keep the existing stack; no new dependencies.”
 
-Compare at most two alternatives against current code. Check compatibility, quality, setup, migration and ongoing cost before perks, including post-credit pricing. Savings require comparable measurements. Preserve receipt IDs for requested handoffs; private outcomes require separate authority for vendor sharing.
+Compare at most two alternatives. Check compatibility, quality, setup, migration and ongoing/post-credit costs before perks. Savings require comparable measurements. Preserve receipt IDs for requested handoffs; private outcomes require separate authority for vendor sharing.
 
 ## Choose one starting tool
 
@@ -25,13 +25,15 @@ Compare at most two alternatives against current code. Check compatibility, qual
 | Resume private work | `get_context` to locate saved work; `get_build_packet` for its implementation plan. Requires `DAI_TOKEN`. |
 | Compare public adoption evidence | `get_adoption_rank`; preserve source and evidence limits. |
 
+Pass the full task as `build_brief.intent`; `query` is optional. Inspect and test optional implementation examples before use.
+
 Save a private plan in the workbench at https://tokensand.com/dashboard?mode=developer#build-workbench. Public project proof is optional. Use public tools without a token; authenticate only for private access.
 
 ## Connect once
 
-The Cursor plugin includes MCP configuration. Reload Cursor and call `get_account_mode`; add a server manually only if Tokens& tools are unavailable. Use [the install page](https://tokensand.com/agents/install?mode=developer) for the Cursor install link or JSON config.
+MCP is included. Reload Cursor and call `get_account_mode`; add a server manually only if Tokens& tools are unavailable. Use [the install page](https://tokensand.com/agents/install?mode=developer) for the Cursor install link or JSON config.
 
-Use the [versioned package](https://tokensand.com/packages/dev-adoption-cli-0.1.33.tgz); npm remains 0.1.12. [Manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json) · [OpenAPI](https://tokensand.com/openapi.json) · [credentials](https://tokensand.com/auth.md).
+Use the [versioned package](https://tokensand.com/packages/dev-adoption-cli-0.1.34.tgz); npm remains 0.1.12. [Manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json) · [OpenAPI](https://tokensand.com/openapi.json) · [credentials](https://tokensand.com/auth.md).
 
 Set `DAI_TOKEN` in the MCP environment for private builder context. Project-scoped tokens are read-only. Use a developer publishing token from https://tokensand.com/projects/new#editor-workflow for project or Agent Skill writes. Keep credentials out of prompts, public context, and committed config.
 
@@ -41,7 +43,7 @@ For public-only use, set or replace the command argument with `--mode public`; t
 
 ## Use offers and skills
 
-Use `find_agent_skills({query:"react",client:"Codex"})` for relevant sources. Follow official installation instructions; declared compatibility is untested.
+Use `find_agent_skills({query:"react",client:"Cursor"})` for relevant sources. Follow official installation instructions; declared compatibility is untested.
 
 Use `find_perks(search:"Tavily")`; `toolId` requires a UUID, never a slug. Missing `search` or `get_account_mode`: update/restart the stale server. Native claims require browser authentication, not workflow tokens.
 
