@@ -9,13 +9,13 @@ Use [Connect your agent](https://tokensand.com/agents/install?mode=developer), r
   "mcpServers": {
     "tokensand": {
       "command": "npx",
-      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.34.tgz", "mcp", "serve", "--api", "https://tokensand.com"]
+      "args": ["-y", "https://tokensand.com/packages/dev-adoption-cli-0.1.35.tgz", "mcp", "serve", "--api", "https://tokensand.com"]
     }
   }
 }
 ```
 
-Website package **0.1.34** is pinned by archive URL; check the live manifest before upgrading. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.34` for the archive URL. Update the package and restart existing MCP sessions to use this release.
+Website package **0.1.35** is pinned by archive URL; check the live manifest before upgrading. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.35` for the archive URL. Update the package and restart existing MCP sessions to use this release.
 
 ## Check one useful task
 
