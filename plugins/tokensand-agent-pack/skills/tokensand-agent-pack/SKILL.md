@@ -16,11 +16,11 @@ The skill bundles two local runners. Resolve `SKILL_DIR` to the directory contai
 - Node default export: `node SKILL_DIR/scripts/check_workflow.mjs --offline-workflow ./observe.workflow.mjs`.
 - Python workflow dictionary: `python3 SKILL_DIR/scripts/check_workflow.py --offline-workflow ./my_workflow.py`.
 
-Use the actual adapter path and service interpreter. Append `--case ID` to repeat one case three times. Run the full suite after a repair. An existing Node repo test can run with `node test/tokensand-workflow.test.mjs`. These checks need no Git commit, Tokens& SDK, MCP connection, or Tokens& account.
+Use the actual adapter path and service interpreter. Repeat with `--case ID`. To inspect expected and actual values locally, add `--inspect-values` and open the printed private file. Run the full suite after a repair. An existing Node repo test can run with `node test/tokensand-workflow.test.mjs`. These checks need no Git commit, Tokens& SDK, MCP connection, or Tokens& account.
 
 Read the runner exit and report which cases and checks failed. For Python, report unscored checks separately and resolve them before recommending a release. If setup is missing, use the [free local starter](https://tokensand.com/agents/install#first-local-check). Ask before provider-backed runs. Local results stay private. Publishing is a separate choice.
 
-For a teammate reviewing a public Node starter, run `npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/ab13d681b5fae781eba4a1c525dee173b5eec6ea/packages/tokensand-workflow-check-0.1.9.tgz --pr-receipt` on the committed app and its root `observe.workflow.mjs`. Exit 0 or 100 writes `.tokensand/starter-check.json`. Show the revision and counts. Leave the receipt local until sharing is requested. [GitHub setup](https://github.com/giolux1235/tokensand-agent-pack#review-a-pull-request).
+For a teammate reviewing a public Node starter, run `npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/0a6d1c9254d9b41a7888e1df29a358fc656952b5/packages/tokensand-workflow-check-0.1.10.tgz --pr-receipt` on the committed app and its root `observe.workflow.mjs`. Exit 0 or 100 writes `.tokensand/starter-check.json`. Show the revision and counts. Leave the receipt local until sharing is requested. [GitHub setup](https://github.com/giolux1235/tokensand-agent-pack#review-a-pull-request).
 
 ## Advise inside the repository
 
