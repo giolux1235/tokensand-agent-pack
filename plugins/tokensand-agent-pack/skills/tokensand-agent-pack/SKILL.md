@@ -20,7 +20,7 @@ Use the actual adapter path and service interpreter. Append `--case ID` to repea
 
 Read the runner exit and report which cases and checks failed. If setup is missing, use the [free local starter](https://tokensand.com/agents/install#first-local-check). Ask before provider-backed runs. Local results stay private. Publishing is a separate choice.
 
-For a teammate reviewing a public Node starter, run `npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/1037c6884d395c7886a69e26e85c2ac3335e720b/packages/tokensand-workflow-check-0.1.4.tgz --pr-receipt` on the committed app and its root `observe.workflow.mjs`. Exit 0 or 100 writes `.tokensand/starter-check.json`. Show the revision and counts. Leave the receipt local until sharing is requested. [GitHub setup](https://github.com/giolux1235/tokensand-agent-pack#review-a-pull-request).
+For a teammate reviewing a public Node starter, run `npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/c277c6e6f3133d7a0ebfdc7b7ed198dd25181ff3/packages/tokensand-workflow-check-0.1.5.tgz --pr-receipt` on the committed app and its root `observe.workflow.mjs`. Exit 0 or 100 writes `.tokensand/starter-check.json`. Show the revision and counts. Leave the receipt local until sharing is requested. [GitHub setup](https://github.com/giolux1235/tokensand-agent-pack#review-a-pull-request).
 
 ## Advise inside the repository
 
