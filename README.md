@@ -66,7 +66,7 @@ git commit --only -m "Record starter check" -- .tokensand/starter-check.json
 git push
 ```
 
-GitHub validates the revision and shows the author-reported counts. Private test output stays on your machine. After another code change or rebase, record a fresh result. To see case names and diagnose a failure locally, replace `--pr-receipt` with `--offline-workflow ./observe.workflow.mjs`. This starter checks the candidate only. For SDK baseline comparisons, see the [integration guide](https://tokensand.com/docs/api#observe-workflow).
+GitHub validates the revision and shows the author-reported counts. Private test output stays on your machine. After another code change or rebase, record a fresh result. When a case fails, the PR summary gives reviewers a command to reproduce it in a trusted checkout of the evaluated revision. This starter checks the candidate only. For SDK baseline comparisons, see the [integration guide](https://tokensand.com/docs/api#observe-workflow).
 
 ### Try a partner challenge in your repository
 

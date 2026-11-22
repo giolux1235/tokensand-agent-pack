@@ -34,5 +34,7 @@ jobs:
           node "$temp/verify.mjs" verify || status=$?
           if [[ "$status" == 2 || "$status" == 3 ]]; then
             printf '\nAuthor command: `npx --yes %s --pr-receipt`\n' "$STARTER_URL" >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$status" == 100 ]]; then
+            printf '\nFrom a trusted checkout of the evaluated revision, run this locally to see the failed cases and checks:\n\n```sh\nnpx --yes %s --offline-workflow ./observe.workflow.mjs\n```\n' "$STARTER_URL" >> "$GITHUB_STEP_SUMMARY"
           fi
           exit "$status"
