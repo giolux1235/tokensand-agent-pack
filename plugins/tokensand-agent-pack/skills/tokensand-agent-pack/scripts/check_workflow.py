@@ -2,6 +2,9 @@
 import argparse
 import copy
 import inspect
+import json
+import reprlib
+import tempfile
 from pathlib import Path
 import runpy
 import subprocess
@@ -39,7 +42,14 @@ workflow = dict(cases=cases, checks=[{"id": "planned_calls", "label": "Schedule 
                 baseline=baseline, candidate=candidate, evaluate=evaluate)
 
 
-def case_suite(definition, case_id=None):
+class ValuePreview(reprlib.Repr):
+    def repr_instance(self, value, level):
+        if value is None or type(value) in (bool, float, complex):
+            return repr(value)
+        return f"<{type(value).__name__}>"
+
+
+def case_suite(definition, case_id=None, inspect_values=False):
     items = definition["cases"]
     if not items or not definition["checks"]:
         raise ValueError("Provide at least one case and one named check.")
@@ -50,11 +60,28 @@ def case_suite(definition, case_id=None):
             raise ValueError(f"Expected one case with exact ID {case_id!r}. Found {len(items)}.")
         trials = 3
 
+    values_path = None
+    if inspect_values:
+        if case_id is None:
+            raise ValueError("--inspect-values requires --case CASE_ID.")
+        with tempfile.NamedTemporaryFile(prefix="tokensand-case-", suffix=".jsonl", delete=False) as handle:
+            values_path = Path(handle.name)
+        preview = ValuePreview()
+        preview.maxlevel = 3
+        preview.maxstring = 256
+        print("Private case values: " + str(values_path), flush=True)
+
     suite = unittest.TestSuite()
     for case in items:
         for trial in range(1, trials + 1):
-            def check(current=case):
+            def check(current=case, repetition=trial):
                 output = definition["candidate"](copy.deepcopy(current["input"]))
+                if values_path is not None:
+                    row = {"trial": repetition, "actual": preview.repr(output)[:2048]}
+                    if isinstance(current["input"], dict) and "expected" in current["input"]:
+                        row["expected"] = preview.repr(current["input"]["expected"])[:2048]
+                    with values_path.open("a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(row) + "\n")
                 scores = definition["evaluate"](copy.deepcopy(current["input"]), output, "candidate")
                 failed, unscored = [], []
                 timed_out = False
@@ -100,13 +127,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Check every offline case once, or repeat one case three times.")
     parser.add_argument("--offline-workflow", type=Path, help="Trusted local Python file exporting a workflow dictionary.")
     parser.add_argument("--case", help="Exact ID of the case to repeat three times.")
+    parser.add_argument("--inspect-values", action="store_true", help="Save local expected and actual value previews for one case.")
     args = parser.parse_args()
+    if args.inspect_values and not args.case:
+        parser.error("--inspect-values requires --case CASE_ID.")
     if args.offline_workflow:
         path = args.offline_workflow.resolve()
         sys.path.insert(0, str(path.parent))
         workflow = runpy.run_path(str(path))["workflow"]
     try:
-        suite = case_suite(workflow, args.case)
+        suite = case_suite(workflow, args.case, args.inspect_values)
     except ValueError as error:
         parser.error(str(error))
     result = unittest.TextTestRunner(verbosity=2).run(suite)

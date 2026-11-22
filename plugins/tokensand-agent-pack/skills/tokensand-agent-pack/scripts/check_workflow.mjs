@@ -1,8 +1,10 @@
 // Offline starter. Replace planCalls with your own local function returning call IDs.
 import assert from "node:assert/strict";
-import { realpathSync } from "node:fs";
+import { appendFileSync, closeSync, mkdtempSync, openSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { isDeepStrictEqual, parseArgs } from "node:util";
+import { inspect, isDeepStrictEqual, parseArgs } from "node:util";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
@@ -33,10 +35,11 @@ const workflow = {
 export default workflow;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  const { values: { "offline-workflow": adapter, case: caseId } } = parseArgs({
-    options: { "offline-workflow": { type: "string" }, case: { type: "string" } },
+  const { values: { "offline-workflow": adapter, case: caseId, "inspect-values": inspectValues } } = parseArgs({
+    options: { "offline-workflow": { type: "string" }, case: { type: "string" }, "inspect-values": { type: "boolean" } },
   });
   assert.ok(adapter !== "" && caseId !== "", "Supply a workflow path or case ID after its option.");
+  assert.ok(!inspectValues || caseId, "--inspect-values requires --case CASE_ID.");
   // Only load a trusted local adapter explicitly selected by the developer.
   const selected = adapter ? (await import(pathToFileURL(adapter).href)).default : workflow;
   assert.ok(selected?.maxCallsPerRun?.candidate === 0, "Set the offline candidate provider budget to zero.");
@@ -47,6 +50,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   if (caseId) {
     assert.equal(items.length, 1, `Expected one workflow case with the exact ID ${JSON.stringify(caseId)}. Found ${items.length}.`);
     console.log(`Checking only ${JSON.stringify(caseId)} for ${trials} trials. Run the full suite before sharing a result.`);
+  }
+  let valuesFile;
+  if (inspectValues) {
+    valuesFile = join(mkdtempSync(join(tmpdir(), "tokensand-case-")), "values.jsonl");
+    closeSync(openSync(valuesFile, "wx", 0o600));
+    console.log("Private case values: " + valuesFile);
+  }
+  function preview(value) {
+    return inspect(value, { customInspect: false, getters: false, depth: 2,
+      maxArrayLength: 12, maxStringLength: 256, colors: false }).slice(0, 2048);
   }
   let interrupted = false;
   test.after(() => {
@@ -82,6 +95,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
       try {
         const output = await selected.candidate(structuredClone(item.input), context);
         assert.ok(!attemptedFetch, "Provider transport is disabled for this offline check.");
+        if (valuesFile) {
+          t.signal.throwIfAborted();
+          const row = { trial: repetition + 1, actual: preview(output) };
+          if (item.input != null && Object.hasOwn(item.input, "expected")) row.expected = preview(item.input.expected);
+          appendFileSync(valuesFile, JSON.stringify(row) + "\n");
+        }
         let scores;
         try {
           scores = await selected.evaluate({ input: structuredClone(item.input), output, variant: "candidate" });
