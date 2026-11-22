@@ -20,6 +20,8 @@ Use the actual adapter path and service interpreter. Repeat with `--case ID`. To
 
 Read the runner exit and report which cases and checks failed. For Python, report unscored checks separately and resolve them before recommending a release. If setup is missing, use the [free local starter](https://tokensand.com/agents/install#first-local-check). Ask before provider-backed runs. Local results stay private. Publishing is a separate choice.
 
+For a repair review, use two saved local Node SDK runs with Git revisions, declared scorer files and the same case. From the later service with its pinned SDK installed, run `node SKILL_DIR/scripts/review-repair-v1.mjs BEFORE_RUN_DIR AFTER_RUN_DIR --case CASE_ID --original-checkout EARLIER_SERVICE`. Use the trusted earlier service checkout. Exit 0 supports recovery for that case, 100 holds it for review, and 1 means setup or evidence needs attention. Keep run directories private.
+
 For a teammate reviewing a public Node starter, run `npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/0a6d1c9254d9b41a7888e1df29a358fc656952b5/packages/tokensand-workflow-check-0.1.10.tgz --pr-receipt` on the committed app and its root `observe.workflow.mjs`. Exit 0 or 100 writes `.tokensand/starter-check.json`. Show the revision and counts. Leave the receipt local until sharing is requested. [GitHub setup](https://github.com/giolux1235/tokensand-agent-pack#review-a-pull-request).
 
 ## Advise inside the repository

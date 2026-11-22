@@ -31,6 +31,18 @@ If a hosted reservation reports 20 retained comparisons, use the command above f
 
 For a first run, omit `--offline-workflow` and its path. The bundled retry example deliberately fails when the same tool call runs twice.
 
+### Did my fix pass the original checks?
+
+With the skill installed, ask Codex or Claude Code to review one case using your before and after run directories and the earlier service checkout. The reviewer scores the saved outputs using your original checks. It keeps inputs and outputs on your machine.
+
+For a project-local Codex install, run this from the later service directory:
+
+```sh
+node "$(git rev-parse --show-toplevel)/.agents/skills/tokensand-agent-pack/scripts/review-repair-v1.mjs" BEFORE_RUN_DIR AFTER_RUN_DIR --case CASE_ID --original-checkout EARLIER_SERVICE
+```
+
+For Claude Code, use `.claude/skills` in the same command. You can also [download the standalone reviewer](https://github.com/giolux1235/tokensand-agent-pack/releases/download/repair-review-1.0.0/review-repair-v1.mjs) once and use that file from any service. Use two saved offline Node SDK runs with Git revisions, declared scorer files and the same case. Install the service’s pinned SDK and the earlier checkout’s dependencies first. Exit `0` confirms the selected repair under the recorded checks, `100` holds it, and `1` means setup or evidence needs attention.
+
 ### Check a Python workflow
 
 In your project’s virtual environment, install the checker and run your trusted local workflow:
