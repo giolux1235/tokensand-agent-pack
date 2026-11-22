@@ -15,7 +15,7 @@ Use [Connect your agent](https://tokensand.com/agents/install?mode=developer), r
 }
 ```
 
-Website package **0.1.36** is pinned by archive URL; check the live manifest before upgrading. npm remains **0.1.12**; do not substitute `@dev-adoption/cli@0.1.36` for the archive URL. Update the package and restart existing MCP sessions to use this release.
+The command above pins the plugin’s published MCP archive. For the current server release and setup instructions, see the [live manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json). Restart the MCP session after changing its configuration.
 
 ## Check one useful task
 

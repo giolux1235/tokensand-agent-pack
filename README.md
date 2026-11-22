@@ -1,38 +1,24 @@
-# Tokens& Agent Pack for Cursor
+# Tokens& Agent Pack
 
-Keep working on the repository you already have. Check AI workflow changes, find tools and docs, check credit eligibility, and reopen a saved build plan.
+Check an AI workflow change in your repository and see which cases failed.
 
-## Install
+## Check a change with Codex or Claude Code
 
-Use [Connect your agent](https://tokensand.com/agents/install?mode=developer) for the Cursor install link. Reload Cursor, then ask:
+From your project directory, install the skill for the agent you use.
 
-> Use Tokens& get_account_mode. Keep my current stack and help with the next task in this repo.
-
-Public lookup needs no Tokens& account. Private saved plans require a scoped `DAI_TOKEN`; browser sign-in does not authenticate MCP. [Setup and credentials](https://tokensand.com/auth.md).
-
-This plugin uses website package **0.1.37**. Verify the live manifest and exact archive before upgrading. The npm registry remains at **0.1.12**; `@dev-adoption/cli@0.1.37` is not published. Existing installations need an update and restart.
-
-[Manual setup and verification](plugins/tokensand-agent-pack/README.md) · [Live package manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json)
-
-Try the [public first-use example](examples/existing-supabase-tracker.md): keep an existing Supabase stack and get a sourced brief for a private project tracker, with the observed result and remaining implementation checks.
-
-## Install the skill in another coding agent
-
-The workflow instructions are also discoverable with the open [skills CLI](https://skills.sh/docs):
-
-```bash
-npx skills add giolux1235/tokensand-agent-pack --skill tokensand-agent-pack
+```sh
+npx --yes skills@1.9.0 add giolux1235/tokensand-agent-pack --skill tokensand-agent-pack --agent codex -y
 ```
 
-Choose Codex or Claude Code when prompted. In your repository, ask **“Use Tokens& to check this change and show me what failed.”** The skill includes offline Node and Python checkers and can use existing project tests. If your app has no checks yet, start with the [free local starter](https://tokensand.com/agents/install#first-local-check). No account or MCP connection is required for offline checks.
+For Claude Code, replace `--agent codex` with `--agent claude-code`. Open a new agent session in the repository and ask:
 
-For public tool discovery or private saved work, connect MCP using [Connect your agent](https://tokensand.com/agents/install). The Cursor plugin bundles both components.
+> Use Tokens& to check this change and show me what failed.
 
-The skills.sh leaderboard reflects real installs; a discoverable repository is not marketplace approval or evidence of product use.
+Local checks run without an account, provider key or MCP connection. If you have no workflow tests, try the challenge below or run the [first local check](https://tokensand.com/agents/install#first-local-check).
 
 ### Try a partner challenge in your repository
 
-After installing the skill for Codex, run this in your checkout. It downloads the synthetic cases for the Tinybird practice challenge the first time. The cases cover late events, duplicate deliveries, and latency reporting.
+Run this in your checkout. For Claude Code, replace `.agents/` with `.claude/`. It downloads the synthetic cases for the Tinybird practice challenge the first time. The cases cover late events, duplicate deliveries, and latency reporting.
 
 ```sh
 (test -e release-telemetry-v1.mjs || curl -fsSL --remove-on-error -o release-telemetry-v1.mjs https://tokensand.com/agent-pack/release-telemetry-v1.mjs) &&
@@ -40,6 +26,12 @@ node .agents/skills/tokensand-agent-pack/scripts/check_workflow.mjs --offline-wo
 ```
 
 The example has three failing cases. Connect the candidate to your app’s reporting function, then rerun. The check runs locally without a Tinybird account. [Challenge and partner docs](https://tokensand.com/challenges#idea-partner-tinybird-agent-telemetry).
+
+## Connect Cursor or access saved work
+
+Install the Cursor plugin, reload Cursor and ask Tokens& to check your change. The plugin includes the workflow skill and MCP. [Connect your agent](https://tokensand.com/agents/install?mode=developer)
+
+Public tool lookup works without signing in. Private saved projects require a scoped `DAI_TOKEN`. Use the published archive for the MCP server version listed in the live manifest. [Manual Cursor setup](plugins/tokensand-agent-pack/README.md) · [Live manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json) · [Credentials](https://tokensand.com/auth.md)
 
 ## What it does
 
