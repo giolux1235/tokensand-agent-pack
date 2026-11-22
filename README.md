@@ -76,4 +76,6 @@ The [Loop Engineering Hackathon gallery](https://loop-engineering-hackathon.devp
 
 ## Maintaining this package
 
+Run `node --test tests/starter-release.test.mjs` before releasing a new checker. It checks the archive used by the agent instructions, this guide and the PR workflow.
+
 The reviewed source is `plugins/tokensand-cursor-plugin` in the private application repository. Sync the MCP configuration and skill after verifying the live package manifest and an isolated public MCP replay. Preserve this repository's marketplace path and license. Update the plugin version so installed clients can detect the release. Source changes alone do not refresh an installed client.
