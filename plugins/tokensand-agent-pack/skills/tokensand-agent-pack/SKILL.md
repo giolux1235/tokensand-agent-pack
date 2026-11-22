@@ -11,7 +11,12 @@ Use relevant existing context and continue authorized repository work; no additi
 
 Work in the affected service. Inspect the trusted local adapter for network calls before running it. Use its existing offline app test first.
 
-For a trusted Python workflow dictionary, run the installed skill’s `scripts/check_workflow.py` with the service’s Python interpreter and `--offline-workflow PATH`. Resolve the script relative to this SKILL.md and the adapter relative to the working directory. It uses the standard library and needs no Tokens& package. Append `--case ID` to repeat one exact case three times. Rerun the full suite after a repair. For a configured Node service, run `node test/tokensand-workflow.test.mjs`. These local checks work before the first Git commit and without MCP or a Tokens& login.
+The skill bundles two local runners. Resolve `SKILL_DIR` to the directory containing this SKILL.md. From the service directory, run the command matching its trusted adapter:
+
+- Node default export: `node SKILL_DIR/scripts/check_workflow.mjs --offline-workflow ./observe.workflow.mjs`.
+- Python workflow dictionary: `python3 SKILL_DIR/scripts/check_workflow.py --offline-workflow ./my_workflow.py`.
+
+Use the actual adapter path and service interpreter. Append `--case ID` to repeat one case three times. Run the full suite after a repair. An existing Node repo test can run with `node test/tokensand-workflow.test.mjs`. These checks need no Git commit, Tokens& SDK, MCP connection, or Tokens& account.
 
 Read the runner exit and report which cases and checks failed. If setup is missing, use the [free local starter](https://tokensand.com/agents/install#first-local-check). Ask before provider-backed runs. Local results stay private. Publishing is a separate choice.
 

@@ -24,11 +24,22 @@ The workflow instructions are also discoverable with the open [skills CLI](https
 npx skills add giolux1235/tokensand-agent-pack --skill tokensand-agent-pack
 ```
 
-Choose Codex or Claude Code when prompted. In your repository, ask **“Use Tokens& to check this change and show me what failed.”** The skill includes an offline Python checker and can use existing project tests. If your app has no checks yet, start with the [free local starter](https://tokensand.com/agents/install#first-local-check). No account or MCP connection is required for offline checks.
+Choose Codex or Claude Code when prompted. In your repository, ask **“Use Tokens& to check this change and show me what failed.”** The skill includes offline Node and Python checkers and can use existing project tests. If your app has no checks yet, start with the [free local starter](https://tokensand.com/agents/install#first-local-check). No account or MCP connection is required for offline checks.
 
 For public tool discovery or private saved work, connect MCP using [Connect your agent](https://tokensand.com/agents/install). The Cursor plugin bundles both components.
 
 The skills.sh leaderboard reflects real installs; a discoverable repository is not marketplace approval or evidence of product use.
+
+### Try a partner challenge in your repository
+
+After installing the skill for Codex, run this in your checkout. It downloads the synthetic cases for the Tinybird practice challenge the first time. The cases cover late events, duplicate deliveries, and latency reporting.
+
+```sh
+(test -e release-telemetry-v1.mjs || curl -fsSL --remove-on-error -o release-telemetry-v1.mjs https://tokensand.com/agent-pack/release-telemetry-v1.mjs) &&
+node .agents/skills/tokensand-agent-pack/scripts/check_workflow.mjs --offline-workflow ./release-telemetry-v1.mjs
+```
+
+The example has three failing cases. Connect the candidate to your app’s reporting function, then rerun. The check runs locally without a Tinybird account. [Challenge and partner docs](https://tokensand.com/challenges#idea-partner-tinybird-agent-telemetry).
 
 ## What it does
 
