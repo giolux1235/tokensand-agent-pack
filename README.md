@@ -1,6 +1,6 @@
 # Tokens& Agent Pack for Cursor
 
-Keep working on the repository you already have. Tokens& helps your coding agent find tools and docs, check credit eligibility, and reopen a saved build plan.
+Keep working on the repository you already have. Check AI workflow changes, find tools and docs, check credit eligibility, and reopen a saved build plan.
 
 ## Install
 
@@ -10,7 +10,7 @@ Use [Connect your agent](https://tokensand.com/agents/install?mode=developer) fo
 
 Public lookup needs no Tokens& account. Private saved plans require a scoped `DAI_TOKEN`; browser sign-in does not authenticate MCP. [Setup and credentials](https://tokensand.com/auth.md).
 
-This plugin uses website package **0.1.34**. Verify the live manifest and exact archive before upgrading. The npm registry remains at **0.1.12**; `@dev-adoption/cli@0.1.34` is not published. Existing installations need an update and restart.
+This plugin uses website package **0.1.37**. Verify the live manifest and exact archive before upgrading. The npm registry remains at **0.1.12**; `@dev-adoption/cli@0.1.37` is not published. Existing installations need an update and restart.
 
 [Manual setup and verification](plugins/tokensand-agent-pack/README.md) · [Live package manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json)
 
@@ -24,7 +24,9 @@ The workflow instructions are also discoverable with the open [skills CLI](https
 npx skills add giolux1235/tokensand-agent-pack --skill tokensand-agent-pack
 ```
 
-Choose your supported agent when prompted. This installs the **skill instructions**, not the MCP server configuration. Connect Tokens& separately using your client's instructions on [Connect your agent](https://tokensand.com/agents/install), then verify `get_account_mode` before trying a task. The Cursor plugin bundles both components.
+Choose Codex or Claude Code when prompted. In your repository, ask **“Use Tokens& to check this change and show me what failed.”** The skill includes an offline Python checker and can use existing project tests. If your app has no checks yet, start with the [free local starter](https://tokensand.com/agents/install#first-local-check). No account or MCP connection is required for offline checks.
+
+For public tool discovery or private saved work, connect MCP using [Connect your agent](https://tokensand.com/agents/install). The Cursor plugin bundles both components.
 
 The skills.sh leaderboard reflects real installs; a discoverable repository is not marketplace approval or evidence of product use.
 

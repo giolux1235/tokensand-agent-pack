@@ -1,11 +1,19 @@
 ---
 name: tokensand-agent-pack
-description: Tokens& stacks, perks, Build Packets, project proof and enterprise context in Cursor.
+description: Check AI workflow changes, explain failing cases, find builder resources, and review projects for sharing.
 ---
 
 # Tokens& Agent Pack
 
 Use relevant existing context and continue authorized repository work; no additional approval step.
+
+## Check a workflow change
+
+Work in the affected service. Inspect the trusted local adapter for network calls before running it. Use its existing offline app test first.
+
+For a trusted Python workflow dictionary, run the installed skill’s `scripts/check_workflow.py` with the service’s Python interpreter and `--offline-workflow PATH`. Resolve the script relative to this SKILL.md and the adapter relative to the working directory. It uses the standard library and needs no Tokens& package. Append `--case ID` to repeat one exact case three times. Rerun the full suite after a repair. For a configured Node service, run `node test/tokensand-workflow.test.mjs`. These local checks work before the first Git commit and without MCP or a Tokens& login.
+
+Read the runner exit and report which cases and checks failed. If setup is missing, use the [free local starter](https://tokensand.com/agents/install#first-local-check). Ask before provider-backed runs. Local results stay private. Publishing is a separate choice.
 
 ## Advise inside the repository
 
