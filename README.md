@@ -16,6 +16,17 @@ For Claude Code, replace `--agent codex` with `--agent claude-code`. Open a new 
 
 Local checks run without an account, provider key or MCP connection. If you have no workflow tests, try the challenge below or run the [first local check](https://tokensand.com/agents/install#first-local-check).
 
+### Run a local check without installing a package
+
+Save the checker for your language in your repository. Run it with your own trusted workflow file.
+
+| Download | Command |
+| --- | --- |
+| [Node.js checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/offline-check-0.1.7/tokensand-first.test.mjs) | `node tokensand-first.test.mjs --offline-workflow ./observe.workflow.mjs` |
+| [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.3/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
+
+For a first run, omit `--offline-workflow` and its path. The bundled retry example deliberately fails when the same tool call runs twice.
+
 ### Check a Python workflow
 
 In your project’s virtual environment, install the checker and run your trusted local workflow:
