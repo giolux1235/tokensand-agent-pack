@@ -16,6 +16,17 @@ For Claude Code, replace `--agent codex` with `--agent claude-code`. Open a new 
 
 Local checks run without an account, provider key or MCP connection. If you have no workflow tests, try the challenge below or run the [first local check](https://tokensand.com/agents/install#first-local-check).
 
+### Check a Python workflow
+
+In your project’s virtual environment, install the checker and run your trusted local workflow:
+
+```sh
+python3 -m pip install https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/b58cda35789a5705a179296d0c2fc37917ffe3b7/packages/tokensand_workflow_check-0.1.3-py3-none-any.whl
+python3 -m tokensand_check --offline-workflow ./my_workflow.py
+```
+
+Try the [SQLite sync example](examples/incremental-sync.py) as `my_workflow.py`. The initial read passes. Resuming a page drops a record when two timestamps match. Rerun with `FIX_CURSOR=1` to verify the repair. “Unscored checks” means a required scorer could not produce a boolean. Resolve it before approving the change.
+
 ### Check a Lovable project
 
 Open your [GitHub-synced Lovable project](https://docs.lovable.dev/integrations/github) in Codex or Claude Code. A local check needs no Tokens& account, gateway key or skill install. Copy this request into the agent:

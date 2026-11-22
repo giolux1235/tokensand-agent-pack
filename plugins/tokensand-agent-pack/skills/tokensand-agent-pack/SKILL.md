@@ -18,7 +18,7 @@ The skill bundles two local runners. Resolve `SKILL_DIR` to the directory contai
 
 Use the actual adapter path and service interpreter. Append `--case ID` to repeat one case three times. Run the full suite after a repair. An existing Node repo test can run with `node test/tokensand-workflow.test.mjs`. These checks need no Git commit, Tokens& SDK, MCP connection, or Tokens& account.
 
-Read the runner exit and report which cases and checks failed. If setup is missing, use the [free local starter](https://tokensand.com/agents/install#first-local-check). Ask before provider-backed runs. Local results stay private. Publishing is a separate choice.
+Read the runner exit and report which cases and checks failed. For Python, report unscored checks separately and resolve them before recommending a release. If setup is missing, use the [free local starter](https://tokensand.com/agents/install#first-local-check). Ask before provider-backed runs. Local results stay private. Publishing is a separate choice.
 
 For a teammate reviewing a public Node starter, run `npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/7df0a16bfe09d0ec15bb97ffa3922334170e6d47/packages/tokensand-workflow-check-0.1.7.tgz --pr-receipt` on the committed app and its root `observe.workflow.mjs`. Exit 0 or 100 writes `.tokensand/starter-check.json`. Show the revision and counts. Leave the receipt local until sharing is requested. [GitHub setup](https://github.com/giolux1235/tokensand-agent-pack#review-a-pull-request).
 
