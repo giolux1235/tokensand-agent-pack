@@ -32,6 +32,8 @@ Save the [starter workflow](https://raw.githubusercontent.com/giolux1235/tokensa
 npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/1037c6884d395c7886a69e26e85c2ac3335e720b/packages/tokensand-workflow-check-0.1.4.tgz --pr-receipt
 ```
 
+With the Agent Pack installed in Codex or Claude Code, you can ask “Prepare the Tokens& result for a teammate to review. Show me what failed and leave it uncommitted.”
+
 Exit 0 means every candidate case passed. Exit 100 means some failed. Both produce `.tokensand/starter-check.json`. Review its four public fields (schema, tested revision, passed cases and failed cases). To share them with reviewers, commit just that file and push your branch.
 
 ```sh
