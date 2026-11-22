@@ -22,8 +22,8 @@ Save the checker for your language in your repository. Run it with your own trus
 
 | Download | Command |
 | --- | --- |
-| [Node.js checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/offline-check-0.1.8/tokensand-first.test.mjs) | `node tokensand-first.test.mjs --offline-workflow ./observe.workflow.mjs` |
-| [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.3/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
+| [Node.js checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/offline-check-0.1.9/tokensand-first.test.mjs) | `node tokensand-first.test.mjs --offline-workflow ./observe.workflow.mjs` |
+| [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.4/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
 
 For a first run, omit `--offline-workflow` and its path. The bundled retry example deliberately fails when the same tool call runs twice.
 
@@ -32,7 +32,7 @@ For a first run, omit `--offline-workflow` and its path. The bundled retry examp
 In your project’s virtual environment, install the checker and run your trusted local workflow:
 
 ```sh
-python3 -m pip install https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/b58cda35789a5705a179296d0c2fc37917ffe3b7/packages/tokensand_workflow_check-0.1.3-py3-none-any.whl
+python3 -m pip install https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/ab13d681b5fae781eba4a1c525dee173b5eec6ea/packages/tokensand_workflow_check-0.1.4-py3-none-any.whl
 python3 -m tokensand_check --offline-workflow ./my_workflow.py
 ```
 
@@ -42,7 +42,7 @@ Try the [SQLite sync example](examples/incremental-sync.py) as `my_workflow.py`.
 
 Open your [GitHub-synced Lovable project](https://docs.lovable.dev/integrations/github) in Codex or Claude Code. A local check needs no Tokens& account, gateway key or skill install. Copy this request into the agent:
 
-> Use Tokens& to check my change locally. Run the existing offline workflow test if it covers this change. Otherwise create observe.workflow.mjs around the changed app function with synthetic model replies or tool results, expected outcomes, named checks and a zero provider budget, then run npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/18895436ea6dccc0eacaa282668c847a017d19ba/packages/tokensand-workflow-check-0.1.8.tgz --offline-workflow ./observe.workflow.mjs. Show which cases failed and why.
+> Use Tokens& to check my change locally. Run the existing offline workflow test if it covers this change. Otherwise create observe.workflow.mjs around the changed app function with synthetic model replies or tool results, expected outcomes, named checks and a zero provider budget, then run npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/ab13d681b5fae781eba4a1c525dee173b5eec6ea/packages/tokensand-workflow-check-0.1.9.tgz --offline-workflow ./observe.workflow.mjs. Show which cases failed and why.
 
 For a working example, copy the [six-case quiz check](examples/lovable-study-review.mjs) to `observe.workflow.mjs` in a checkout of [SparkSage at the tested revision](https://github.com/tahsan2544/sparksage/tree/ab0bb8fa7c134d9baae19c3ec1aaeca6a7e85737). Run the command above on Node 24. It imports the app’s TypeScript parser and checks plain, fenced, prefaced, empty and malformed model replies. Append `--case markdown-json` to repeat that case three times. The original parser passes all six cases.
 
@@ -51,7 +51,7 @@ For a working example, copy the [six-case quiz check](examples/lovable-study-rev
 Save the [starter workflow](examples/github/starter-check.yml) as `.github/workflows/tokensand-starter.yml` in your repository. Commit it, your app changes and the offline `observe.workflow.mjs` you want to check. From that checkout, run the public checker.
 
 ```sh
-npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/18895436ea6dccc0eacaa282668c847a017d19ba/packages/tokensand-workflow-check-0.1.8.tgz --pr-receipt
+npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/ab13d681b5fae781eba4a1c525dee173b5eec6ea/packages/tokensand-workflow-check-0.1.9.tgz --pr-receipt
 ```
 
 With the Agent Pack installed in Codex or Claude Code, you can ask “Prepare the Tokens& result for a teammate to review. Show me what failed and leave it uncommitted.”
