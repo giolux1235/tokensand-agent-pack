@@ -48,6 +48,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     assert.equal(items.length, 1, `Expected one workflow case with the exact ID ${JSON.stringify(caseId)}. Found ${items.length}.`);
     console.log(`Checking only ${JSON.stringify(caseId)} for ${trials} trials. Run the full suite before sharing a result.`);
   }
+  let interrupted = false;
+  test.after(() => {
+    if (!interrupted) return;
+    // A callback can ignore its abort signal and leave a socket open. Allow
+    // normal teardown and reporter completion first. Successful tests must
+    // retain Node's normal handling of late asynchronous errors.
+    setTimeout(() => {
+      console.error("The interrupted workflow still has work running. Pass ctx.signal to tool requests and close open connections before retrying.");
+      process.exit(1);
+    }, 1000).unref();
+  });
   function registerCase(item, repetition) {
     const name = caseId ? `${item.id} (trial ${repetition + 1}/${trials})` : item.id;
     test(name, { timeout: selected.timeoutMs }, async (t) => {
@@ -65,15 +76,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
           throw new Error("Provider transport is disabled for this offline check.");
         },
       };
-      const output = await selected.candidate(structuredClone(item.input), context);
-      assert.ok(!attemptedFetch, "Provider transport is disabled for this offline check.");
-      const scores = await selected.evaluate({ input: item.input, output, variant: "candidate" });
-      const failed = [];
-      for (const check of selected.checks) {
-        const score = scores[check.id];
-        if ((typeof score === "function" ? await score() : score) !== true) failed.push(check.label || check.id);
+      const onAbort = () => { interrupted = true; };
+      t.signal.addEventListener("abort", onAbort, { once: true });
+      try {
+        const output = await selected.candidate(structuredClone(item.input), context);
+        assert.ok(!attemptedFetch, "Provider transport is disabled for this offline check.");
+        const scores = await selected.evaluate({ input: item.input, output, variant: "candidate" });
+        const failed = [];
+        for (const check of selected.checks) {
+          const score = scores[check.id];
+          if ((typeof score === "function" ? await score() : score) !== true) failed.push(check.label || check.id);
+        }
+        assert.equal(failed.length, 0, failed.join(", "));
+      } finally {
+        t.signal.removeEventListener("abort", onAbort);
       }
-      assert.equal(failed.length, 0, failed.join(", "));
     });
   }
   for (const item of items) {
