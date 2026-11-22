@@ -25,6 +25,8 @@ Save the checker for your language in your repository. Run it with your own trus
 | [Node.js checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/offline-check-0.1.9/tokensand-first.test.mjs) | `node tokensand-first.test.mjs --offline-workflow ./observe.workflow.mjs` |
 | [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.4/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
 
+If a hosted reservation reports 20 retained comparisons, use the command above for your trusted, offline candidate. It checks your current code immediately and keeps the result on your machine. Preserve the original run directory for hosted review.
+
 For a first run, omit `--offline-workflow` and its path. The bundled retry example deliberately fails when the same tool call runs twice.
 
 ### Check a Python workflow
