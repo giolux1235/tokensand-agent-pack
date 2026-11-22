@@ -1,8 +1,10 @@
 """Offline starter. Replace plan_calls with your own local function returning call IDs."""
 import argparse
 import copy
+import inspect
 from pathlib import Path
 import runpy
+import subprocess
 import sys
 import unittest
 
@@ -54,10 +56,34 @@ def case_suite(definition, case_id=None):
             def check(current=case):
                 output = definition["candidate"](copy.deepcopy(current["input"]))
                 scores = definition["evaluate"](current["input"], output, "candidate")
-                failed = [str(rule.get("label") or rule["id"]) for rule in definition["checks"]
-                          if scores.get(rule["id"]) is not True]
+                failed, unscored = [], []
+                timed_out = False
+                for rule in definition["checks"]:
+                    label = str(rule.get("label") or rule["id"])
+                    score = scores.get(rule["id"])
+                    if timed_out:
+                        unscored.append(label)
+                        continue
+                    try:
+                        value = score() if callable(score) else score
+                    except Exception as error:
+                        timed_out = isinstance(error, (TimeoutError, subprocess.TimeoutExpired))
+                        unscored.append(label)
+                        continue
+                    if value is False:
+                        failed.append(label)
+                    elif value is not True:
+                        if inspect.iscoroutine(value):
+                            value.close()
+                        unscored.append(label)
+                reasons = []
                 if failed:
-                    raise AssertionError("Failed checks: " + ", ".join(failed))
+                    reasons.append("Failed checks: " + ", ".join(failed))
+                if unscored:
+                    reasons.append("Unscored checks: " + ", ".join(unscored))
+                    raise RuntimeError("\n".join(reasons))
+                if failed:
+                    raise AssertionError("\n".join(reasons))
 
             check.__name__ = str(case["id"])
             if case_id is not None:
