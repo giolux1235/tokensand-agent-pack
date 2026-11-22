@@ -84,7 +84,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
         assert.ok(!attemptedFetch, "Provider transport is disabled for this offline check.");
         let scores;
         try {
-          scores = await selected.evaluate({ input: item.input, output, variant: "candidate" });
+          scores = await selected.evaluate({ input: structuredClone(item.input), output, variant: "candidate" });
         } catch {
           // No scorer map was returned. Each declared check remains unscored.
         }

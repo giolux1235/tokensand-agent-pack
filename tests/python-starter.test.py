@@ -12,7 +12,7 @@ SCRIPT = ROOT / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/script
 
 class PythonRelease(unittest.TestCase):
     def test_shipped_runner(self):
-        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.3-py3-none-any.whl") as wheel:
+        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.4-py3-none-any.whl") as wheel:
             self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
         for repair, outage, code, message in [
             ("0", "0", 1, "Failed checks: Return every remaining record"),
@@ -28,6 +28,20 @@ class PythonRelease(unittest.TestCase):
                 self.assertEqual(run.returncode, code, run.stderr)
                 self.assertIn(message, run.stderr)
                 self.assertNotIn("private fixture detail", run.stderr)
+
+    def test_repetitions_isolate_a_consumed_grader_input(self):
+        import runpy
+        result = unittest.TestResult()
+        case_suite = runpy.run_path(str(SCRIPT))["case_suite"]
+        source = {"required": [50]}
+        definition = {
+            "cases": [{"id": "threshold", "input": source}],
+            "checks": [{"id": "boundary"}], "candidate": lambda _: 49,
+            "evaluate": lambda item, output, _: {"boundary": not item["required"] or output == item["required"].pop()},
+        }
+        case_suite(definition, "threshold").run(result)
+        self.assertEqual((result.testsRun, len(result.failures), len(result.errors)), (3, 3, 0))
+        self.assertEqual(source, {"required": [50]})
 
 
 if __name__ == "__main__":

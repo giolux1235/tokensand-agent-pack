@@ -55,7 +55,7 @@ def case_suite(definition, case_id=None):
         for trial in range(1, trials + 1):
             def check(current=case):
                 output = definition["candidate"](copy.deepcopy(current["input"]))
-                scores = definition["evaluate"](current["input"], output, "candidate")
+                scores = definition["evaluate"](copy.deepcopy(current["input"]), output, "candidate")
                 failed, unscored = [], []
                 timed_out = False
                 for rule in definition["checks"]:
