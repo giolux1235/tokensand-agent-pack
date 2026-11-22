@@ -78,6 +78,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
       };
       const onAbort = () => { interrupted = true; };
       t.signal.addEventListener("abort", onAbort, { once: true });
+      const started = performance.now();
       try {
         const output = await selected.candidate(structuredClone(item.input), context);
         assert.ok(!attemptedFetch, "Provider transport is disabled for this offline check.");
@@ -86,6 +87,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
         for (const check of selected.checks) {
           const score = scores[check.id];
           if ((typeof score === "function" ? await score() : score) !== true) failed.push(check.label || check.id);
+        }
+        // A synchronous callback can finish before Node gets a turn to fire its timer.
+        const elapsed = performance.now() - started;
+        if (Number.isFinite(selected.timeoutMs) && elapsed > selected.timeoutMs) {
+          failed.push(`Case took ${Math.ceil(elapsed)} ms (deadline ${selected.timeoutMs} ms)`);
         }
         assert.equal(failed.length, 0, failed.join(", "));
       } finally {
