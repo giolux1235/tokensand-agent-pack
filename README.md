@@ -20,9 +20,27 @@ Local checks run without an account, provider key or MCP connection. If you have
 
 Open your [GitHub-synced Lovable project](https://docs.lovable.dev/integrations/github) in Codex or Claude Code. A local check needs no Tokens& account, gateway key or skill install. Copy this request into the agent:
 
-> Use Tokens& to check my change locally. Run the existing offline workflow test if it covers this change. Otherwise create observe.workflow.mjs around the changed app function with synthetic model replies or tool results, expected outcomes, named checks and a zero provider budget, then run npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/12aa784555392d9afadb97e2e495b6d0248e61de/packages/tokensand-workflow-check-0.1.3.tgz --offline-workflow ./observe.workflow.mjs. Show which cases failed and why.
+> Use Tokens& to check my change locally. Run the existing offline workflow test if it covers this change. Otherwise create observe.workflow.mjs around the changed app function with synthetic model replies or tool results, expected outcomes, named checks and a zero provider budget, then run npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/1037c6884d395c7886a69e26e85c2ac3335e720b/packages/tokensand-workflow-check-0.1.4.tgz --offline-workflow ./observe.workflow.mjs. Show which cases failed and why.
 
 For a working example, copy the [six-case quiz check](examples/lovable-study-review.mjs) to `observe.workflow.mjs` in a checkout of [SparkSage at the tested revision](https://github.com/tahsan2544/sparksage/tree/ab0bb8fa7c134d9baae19c3ec1aaeca6a7e85737). Run the command above on Node 24. It imports the app’s TypeScript parser and checks plain, fenced, prefaced, empty and malformed model replies. Append `--case markdown-json` to repeat that case three times. The original parser passes all six cases.
+
+### Review a pull request
+
+Save the [starter workflow](https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/73647e56f181caf0d04758184e8372e64ecb8cb5/examples/github/starter-check.yml) as `.github/workflows/tokensand-starter.yml` in your repository. Commit it, your app changes and the offline `observe.workflow.mjs` you want to check. From that checkout, run the public checker.
+
+```sh
+npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/1037c6884d395c7886a69e26e85c2ac3335e720b/packages/tokensand-workflow-check-0.1.4.tgz --pr-receipt
+```
+
+Exit 0 means every candidate case passed. Exit 100 means some failed. Both produce `.tokensand/starter-check.json`. Review its four public fields (schema, tested revision, passed cases and failed cases). To share them with reviewers, commit just that file and push your branch.
+
+```sh
+git add -- .tokensand/starter-check.json
+git commit --only -m "Record starter check" -- .tokensand/starter-check.json
+git push
+```
+
+GitHub validates the revision and shows the author-reported counts. Private test output stays on your machine. After another code change or rebase, record a fresh result. To see case names and diagnose a failure locally, replace `--pr-receipt` with `--offline-workflow ./observe.workflow.mjs`. This starter checks the candidate only. For SDK baseline comparisons, see the [integration guide](https://tokensand.com/docs/api#observe-workflow).
 
 ### Try a partner challenge in your repository
 
