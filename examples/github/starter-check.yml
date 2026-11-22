@@ -1,0 +1,38 @@
+name: Tokens& starter cases
+
+on: pull_request
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Tokens& starter cases
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify the author's offline result
+        shell: bash
+        env:
+          EXPECTED_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          STARTER_URL: https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/1037c6884d395c7886a69e26e85c2ac3335e720b/packages/tokensand-workflow-check-0.1.4.tgz
+        run: |
+          temp=$(mktemp -d "$RUNNER_TEMP/tokensand-starter.XXXXXX")
+          trap 'rm -rf -- "$temp"' EXIT
+          if ! curl --fail --silent --show-error --max-time 20 --proto '=https' "$STARTER_URL" -o "$temp/check.tgz" ||
+             ! echo "240d8802dcf7db07e8d37523c97caa07b141a6ed4dbd851b1a9dbd6b4f2904fc  $temp/check.tgz" | sha256sum --check --status ||
+             ! tar -xOzf "$temp/check.tgz" package/starter-pr.mjs > "$temp/verify.mjs"; then
+            printf '## Tokens& starter cases\n\nStatus: **verifier unavailable**\nNext: Rerun this job when the pinned public package is available.\n' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          status=0
+          node "$temp/verify.mjs" verify || status=$?
+          if [[ "$status" == 2 || "$status" == 3 ]]; then
+            printf '\nAuthor command: `npx --yes %s --pr-receipt`\n' "$STARTER_URL" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
