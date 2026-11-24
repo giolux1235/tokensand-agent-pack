@@ -9,7 +9,11 @@ Use relevant existing context and continue authorized repository work; no additi
 
 ## Check a workflow change
 
-Work in the affected service. Inspect the trusted local adapter for network calls before running it. Use its existing offline app test first.
+Start with the affected service’s existing offline regression test. Use its interpreter and narrow pytest target (`python -m pytest -q TEST_TARGET`) or unittest test ID. Report the failing test names, skips, setup errors and empty collection separately. This is a local app test. When reviewing a repair across supplied revisions, rerun the same strengthened tests and fixtures on both implementations.
+
+For existing pytest JUnit reports, run `python3 SKILL_DIR/scripts/review_pytest.py BEFORE.xml AFTER.xml --before-root EARLIER --after-root LATER --test-source TEST_FILE`. Repeat `--test-source` for relevant fixtures and configuration. Keep reports private. Exit 100 holds the review, 1 indicates invalid inputs. Read the JUnit summary alongside the native pytest result.
+
+Inspect trusted adapters for network calls before running them.
 
 The skill bundles two local runners. Resolve `SKILL_DIR` to the directory containing this SKILL.md. From the service directory, run the command matching its trusted adapter:
 

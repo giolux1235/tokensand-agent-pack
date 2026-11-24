@@ -16,6 +16,26 @@ For Claude Code, replace `--agent codex` with `--agent claude-code`. Open a new 
 
 Local checks run without an account, provider key or MCP connection. If you have no workflow tests, try the challenge below or run the [first local check](https://tokensand.com/agents/install#first-local-check).
 
+### Review an existing Python test
+
+Start in the later checkout with the skill installed. Use the same shell for these commands. Set the path to your earlier checkout and the test you want to review. Run each checkout with its own installed dependencies.
+
+```sh
+earlier=../earlier-service
+target=tests/test_workflow.py
+reports=$(mktemp -d)
+(cd "$earlier" && python -m pytest -q "$target" --junitxml="$reports/before.xml")
+python -m pytest -q "$target" --junitxml="$reports/after.xml"
+```
+
+A failing test still produces a report. Once both runs finish, review their results locally:
+
+```sh
+python3 .agents/skills/tokensand-agent-pack/scripts/review_pytest.py "$reports/before.xml" "$reports/after.xml" --before-root "$earlier" --after-root . --test-source "$target"
+```
+
+For Claude Code, use `.claude/skills` in the reviewer path. Repeat `--test-source` for fixtures and configuration that affect the assertions. The reviewer names changed cases and flags changes to those files. Check the original pytest summaries for unexpected passes. The XML files can contain private tracebacks. Keep them local.
+
 ### Run a local check without installing a package
 
 Save the checker for your language in your repository. Run it with your own trusted workflow file.
