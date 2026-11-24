@@ -34,7 +34,9 @@ A failing test still produces a report. Once both runs finish, review their resu
 python3 .agents/skills/tokensand-agent-pack/scripts/review_pytest.py "$reports/before.xml" "$reports/after.xml" --before-root "$earlier" --after-root . --test-source "$target"
 ```
 
-For Claude Code, use `.claude/skills` in the reviewer path. Repeat `--test-source` for fixtures and configuration that affect the assertions. The reviewer names changed cases and flags changes to those files. Check the original pytest summaries for unexpected passes. The XML files can contain private tracebacks. Keep them local.
+For Claude Code, use `.claude/skills` in the reviewer path. Pass each test file in the reports. The reviewer checks parent directories up to each checkout root for `conftest.py` and pytest configuration. Changed fixture code or pytest settings hold the repair for review. In shared config files such as `pyproject.toml`, it compares pytest settings when it can read them. A full-file hash is used otherwise.
+
+Add imported fixture helpers, data and custom configuration with `--test-source` to compare those entire files. To locate a fixture, run `python -m pytest --fixtures-per-test "$target"` in the trusted checkout. Check the original pytest summaries for unexpected passes. Keep the XML reports local.
 
 ### Run a local check without installing a package
 

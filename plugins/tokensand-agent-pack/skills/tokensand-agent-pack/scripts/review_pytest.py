@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Review two local pytest JUnit reports against explicitly declared test sources."""
+"""Review two local pytest JUnit reports against test sources and their pytest controls."""
 import argparse
+import configparser
 import hashlib
 import json
 import re
@@ -27,7 +28,11 @@ class Arguments(argparse.ArgumentParser):
 ATTACHMENTS = {"properties", "system-out", "system-err"}
 OUTCOMES = {"failure": "failed", "error": "error", "skipped": "skipped"}
 LIMIT = 16 * 1024 * 1024
+PYTEST_CONTROLS = ("conftest.py", "pytest.toml", ".pytest.toml", "pytest.ini", ".pytest.ini",
+                   "pyproject.toml", "tox.ini", "setup.cfg")
+SHARED_CONFIGS = {"pyproject.toml", "tox.ini", "setup.cfg"}
 SCOPE = ("User-supplied report/checkout pairing. Source hashes describe the files now. "
+         "Shared configs are marked when only pytest settings were compared. Declare imported helpers and data separately. "
          "JUnit can omit non-strict XPASS; check the native pytest terminal outcome. "
          "This review does not authorize a release.")
 
@@ -87,16 +92,44 @@ def read_report(path):
     return cases
 
 
-def source_sha(root, relative):
-    path = (root / relative).resolve()
+def pytest_settings(name, data):
+    if name == "pyproject.toml":
+        import tomllib  # Without the Python 3.11+ parser, the caller compares the full file.
+        doc = tomllib.loads(data.decode())
+        return {"pytest": doc.get("tool", {}).get("pytest"),
+                "pytest11": doc.get("project", {}).get("entry-points", {}).get("pytest11")}
+    config = configparser.RawConfigParser()
+    config.optionxform = str
+    config.read_string(data.decode())
+    sections = {s: dict(config[s]) for s in ("pytest", "tool:pytest") if s in config}
+    if name == "setup.cfg" and config.has_option("options.entry_points", "pytest11"):
+        sections["pytest11"] = config.get("options.entry_points", "pytest11")
+    return sections
+
+
+def source_sha(root, relative, compare_settings=False):
+    entry = root / relative
+    path = entry.resolve()
     if not path.is_relative_to(root):
         raise Invalid("declared test source escapes its checkout")
     if not path.exists():
+        if entry.is_symlink():
+            raise Invalid("test source has a broken symbolic link")
         return None
     if not path.is_file():
         raise Invalid("declared test source must be a regular file")
     digest = hashlib.sha256()
     with path.open("rb") as stream:
+        if compare_settings and relative.name in SHARED_CONFIGS:
+            data = stream.read(1024 * 1024 + 1)
+            if len(data) <= 1024 * 1024:
+                try:
+                    settings = pytest_settings(relative.name, data)
+                    payload = json.dumps(settings, sort_keys=True, allow_nan=False).encode()
+                    return "pytest-settings/" + hashlib.sha256(payload).hexdigest()
+                except (ImportError, ValueError, TypeError, AttributeError, RecursionError, configparser.Error):
+                    pass  # Unreadable configuration must still be compared byte for byte.
+            stream.seek(0)
         for block in iter(lambda: stream.read(65536), b""):
             digest.update(block)
     return digest.hexdigest()
@@ -116,16 +149,21 @@ def review(args):
     roots = [path.resolve(strict=True) for path in (args.before_root, args.after_root)]
     if not all(root.is_dir() for root in roots):
         raise Invalid("checkout roots must be directories")
-    sources = []
-    same_sources = True
-    for relative in dict.fromkeys(args.test_source):
+    declared = dict.fromkeys(args.test_source)
+    controls = set()
+    for relative in declared:
         if relative.is_absolute() or ".." in relative.parts or not relative.parts:
             raise Invalid("use a checkout-relative test source path")
-        old, new = (source_sha(root, relative) for root in roots)
+        controls.update(parent / name for parent in relative.parents for name in PYTEST_CONTROLS)
+    sources = []
+    for relative in [*declared, *sorted(controls.difference(declared))]:
+        old, new = (source_sha(root, relative, compare_settings=relative not in declared) for root in roots)
         if old is None and new is None:
-            raise Invalid("declared test source missing from both checkouts")
-        same_sources = same_sources and old == new
-        sources.append((str(relative), old, new))
+            if relative in declared:
+                raise Invalid("declared test source missing from both checkouts")
+            continue
+        sources.append((relative, old, new))
+    same_sources = all(old == new for _, old, new in sources)
     comparable = same_sources and before.keys() == after.keys()
     eligible = (comparable
                 and all(state in {"passed", "failed"} for state in before.values())
@@ -134,9 +172,10 @@ def review(args):
     print(f"Baseline passed {list(before.values()).count('passed')}/{len(before)}; candidate passed {list(after.values()).count('passed')}/{len(after)}.")
     for path, old, new in sources:
         detail = old if old == new else f"{old or 'missing'} -> {new or 'missing'} (changed)"
-        print(f"Declared source {json.dumps(path)}: {detail}")
+        label = "Declared source" if path in declared else "Ancestor control"
+        print(f"{label} {json.dumps(str(path))}: {detail}")
     if not same_sources:
-        print("Declared test sources changed. These reports cannot establish a repair.")
+        print("Test sources or fixture/config files changed. Rerun both implementations with the same controls.")
     if before.keys() != after.keys():
         print("Test coverage changed. Review added or missing cases.")
     for key in sorted(before.keys() | after.keys()):

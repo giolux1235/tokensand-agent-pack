@@ -11,7 +11,7 @@ Use relevant existing context and continue authorized repository work; no additi
 
 Start with the affected service’s existing offline regression test. Use its interpreter and narrow pytest target (`python -m pytest -q TEST_TARGET`) or unittest test ID. Report the failing test names, skips, setup errors and empty collection separately. This is a local app test. When reviewing a repair across supplied revisions, rerun the same strengthened tests and fixtures on both implementations.
 
-For existing pytest JUnit reports, run `python3 SKILL_DIR/scripts/review_pytest.py BEFORE.xml AFTER.xml --before-root EARLIER --after-root LATER --test-source TEST_FILE`. Repeat `--test-source` for relevant fixtures and configuration. Keep reports private. Exit 100 holds the review, 1 indicates invalid inputs. Read the JUnit summary alongside the native pytest result.
+For pytest JUnit reports: `python3 SKILL_DIR/scripts/review_pytest.py BEFORE.xml AFTER.xml --before-root EARLIER --after-root LATER --test-source TEST_FILE`. List each test file. Ancestor conftest.py and standard configs are checked automatically. Add imported helpers, custom configs and data via `--test-source`. Keep reports private; 100 holds, 1 invalid. Check native pytest for unexpected passes.
 
 Inspect trusted adapters for network calls before running them.
 

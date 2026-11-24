@@ -32,10 +32,11 @@ class Review(unittest.TestCase):
             ET.SubElement(case, "system-out").text = "PRIVATE_APP_OUTPUT"
         ET.ElementTree(suite).write(self.root / (arm + ".xml"))
 
-    def run_review(self, expected):
+    def run_review(self, expected, *sources):
+        sources = sources or ("tests/test_agent.py", "tests/conftest.py")
         result = subprocess.run([sys.executable, "-I", "-B", SCRIPT, self.root / "before.xml", self.root / "after.xml",
                                  "--before-root", self.root / "before", "--after-root", self.root / "after",
-                                 "--test-source", "tests/test_agent.py", "--test-source", "tests/conftest.py"],
+                                 *[arg for source in sources for arg in ("--test-source", source)]],
                                 capture_output=True, text=True, cwd=self.root)
         message = result.stdout + result.stderr
         self.assertEqual(result.returncode, expected, message)
@@ -52,6 +53,76 @@ class Review(unittest.TestCase):
         self.report("after", ("pagination", None))
         (self.root / "after/tests/conftest.py").write_text("# transport no longer checks the cursor\n")
         self.assertIn("conftest.py", self.run_review(100))
+
+    def test_ancestor_controls_cover_both_trees_and_ignore_siblings(self):
+        target = "tests/worker/check_delivery.py"
+        for arm in ["before", "after"]:
+            test = self.root / arm / target
+            test.parent.mkdir()
+            test.write_text("def test_redelivery(): pass\n")
+        self.report("before", ("redelivery", "failure"))
+        self.report("after", ("redelivery", None))
+        sibling = self.root / "after/tests/other/conftest.py"
+        sibling.parent.mkdir()
+        sibling.write_text("# unrelated defaults")
+        self.assertIn("(recovered)", self.run_review(0, target))
+        for rel in ("conftest.py", "tests/worker/conftest.py", "tests/.pytest.toml", "pyproject.toml"):
+            for arm in ("before", "after"):
+                control = self.root / arm / rel
+                with self.subTest(path=rel, arm=arm):
+                    control.write_text("# fixture or config changed")
+                    output = self.run_review(100, target)
+                    self.assertIn(rel, output)
+                    self.assertNotIn("(recovered)", output)
+                    control.unlink()
+        (self.root / "after/tests/conftest.py").write_text("# retry disabled")
+        self.assertIn("tests/conftest.py", self.run_review(100, target))
+
+    def test_implicit_fixture_may_not_escape_checkout(self):
+        self.report("before", ("redelivery", "failure"))
+        self.report("after", ("redelivery", None))
+        (self.root / "after/conftest.py").symlink_to(self.root / "before/tests/conftest.py")
+        self.assertIn("escapes its checkout", self.run_review(1, "tests/test_agent.py"))
+
+    def test_shared_config_distinguishes_package_metadata_from_pytest_settings(self):
+        self.report("before", ("delivery", "failure"))
+        self.report("after", ("delivery", None))
+        for name, metadata, settings, changed in [
+            ("setup.cfg", "[metadata]\nversion = ", "[tool:pytest]\naddopts = -q\n", "--strict-markers"),
+            ("tox.ini", "[tox]\nenvlist = ", "[pytest]\naddopts = -q\n", "--strict-markers"),
+            ("pyproject.toml", "[project]\nversion = ", '[tool.pytest.ini_options]\naddopts = "-q"\n', "--strict-markers"),
+        ]:
+            with self.subTest(config=name):
+                before = self.root / "before" / name
+                after = self.root / "after" / name
+                before.write_text(metadata + '"1.0"\n' + settings)
+                after.write_text(metadata + '"1.1"\n' + settings)
+                expected = 100 if name == "pyproject.toml" and sys.version_info < (3, 11) else 0
+                self.run_review(expected, "tests/test_agent.py")
+                self.run_review(100, "tests/test_agent.py", name)
+                after.write_text(metadata + '"1.1"\n' + settings.replace("-q", changed))
+                self.run_review(100, "tests/test_agent.py")
+                before.unlink()
+                after.unlink()
+
+    def test_unparseable_shared_config_uses_full_file_hash(self):
+        self.report("before", ("delivery", "failure"))
+        self.report("after", ("delivery", None))
+        for arm in ("before", "after"):
+            (self.root / arm / "setup.cfg").write_text("[invalid " + arm)
+        self.assertIn("setup.cfg", self.run_review(100, "tests/test_agent.py"))
+
+    def test_changed_pytest_plugin_entry_points_hold_the_review(self):
+        self.report("before", ("delivery", "failure"))
+        self.report("after", ("delivery", None))
+        for name, section in (("setup.cfg", "[options.entry_points]\npytest11 = "),
+                              ("pyproject.toml", "[project.entry-points.pytest11]\nledger = ")):
+            with self.subTest(config=name):
+                for arm in ("before", "after"):
+                    (self.root / arm / name).write_text(section + '"' + arm + '"')
+                self.run_review(100, "tests/test_agent.py")
+                for arm in ("before", "after"):
+                    (self.root / arm / name).unlink()
 
     def test_missing_or_unscored_is_not_a_repair(self):
         self.report("before", ("pagination", "failure"), ("other", None))
