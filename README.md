@@ -102,12 +102,12 @@ Try the [SQLite sync example](examples/incremental-sync.py) as `my_workflow.py`.
 
 Open your [GitHub-synced Lovable project](https://docs.lovable.dev/integrations/github) in Codex or Claude Code. A local check needs no Tokens& account, gateway key or skill install. Copy this request into the agent:
 
-> Use Tokens& to check my change locally. Run the existing offline workflow test if it covers this change. Otherwise create observe.workflow.mjs around the changed app function with synthetic model replies or tool results, expected outcomes, named checks and a zero provider budget, then run npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/2d6f77ae7e74aaedd9071334e3a23f0b6bbe717b/packages/tokensand-workflow-check-0.1.11.tgz --offline-workflow ./observe.workflow.mjs. Show which cases failed and why.
+> Use Tokens& to check my change locally. Run the existing offline workflow test if it covers this change. Otherwise create observe.workflow.mjs around the changed app function with synthetic model replies or tool results, expected outcomes, named checks and a zero provider budget, then run npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/2f9ddd41ec897c2668179ffd2c703446e26f8ecd/packages/tokensand-workflow-check-0.1.13.tgz --offline-workflow ./observe.workflow.mjs. Show which cases failed and why.
 
 Before connecting a Node workflow, check the tool and step labels reached by its candidate cases:
 
 ```sh
-npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/2d6f77ae7e74aaedd9071334e3a23f0b6bbe717b/packages/tokensand-workflow-check-0.1.11.tgz --offline-workflow ./observe.workflow.mjs --require-hosted-labels
+npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/2f9ddd41ec897c2668179ffd2c703446e26f8ecd/packages/tokensand-workflow-check-0.1.13.tgz --offline-workflow ./observe.workflow.mjs --require-hosted-labels
 ```
 
 A label warning names the required format and keeps the label private. The optional flag exits 2 for incompatible labels or when no instrumented call ran. A connected run verifies the full experiment.
