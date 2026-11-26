@@ -35,14 +35,28 @@ const workflow = {
 export default workflow;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  const { values: { "offline-workflow": adapter, case: caseId, "inspect-values": inspectValues, "inspect-tools": inspectTools, "require-hosted-labels": requireHostedLabels } } = parseArgs({
-    options: { "offline-workflow": { type: "string" }, case: { type: "string" }, "inspect-values": { type: "boolean" }, "inspect-tools": { type: "boolean" }, "require-hosted-labels": { type: "boolean" } },
-  });
-  assert.ok(adapter !== "" && caseId !== "", "Supply a workflow path or case ID after its option.");
-  assert.ok(!inspectValues || caseId, "--inspect-values requires --case CASE_ID.");
-  if (inspectTools && !caseId) {
-    console.error("--inspect-tools requires --case CASE_ID.");
+  function invalidSelection(message) {
+    console.error(message);
     process.exit(2);
+  }
+  let values;
+  try {
+    ({ values } = parseArgs({
+      options: {
+        "offline-workflow": { type: "string", multiple: true }, case: { type: "string", multiple: true },
+        "inspect-values": { type: "boolean" }, "inspect-tools": { type: "boolean" }, "require-hosted-labels": { type: "boolean" },
+      },
+    }));
+  } catch {
+    invalidSelection("Check your options. Use --offline-workflow PATH and repeat --case=ID to select cases.");
+  }
+  const { "offline-workflow": paths = [], case: caseIds = [], "inspect-values": inspectValues, "inspect-tools": inspectTools, "require-hosted-labels": requireHostedLabels } = values;
+  if (paths.length > 1) invalidSelection("Use --offline-workflow once. Run each workflow in a separate command.");
+  const [adapter] = paths;
+  if (adapter === "" || caseIds.includes("")) invalidSelection("Supply a workflow path or case ID after its option.");
+  if (new Set(caseIds).size !== caseIds.length) invalidSelection("A --case ID was requested more than once. List each ID once.");
+  if ((inspectTools || inspectValues) && caseIds.length !== 1) {
+    invalidSelection((inspectTools ? "--inspect-tools" : "--inspect-values") + " requires --case CASE_ID. Select exactly one case to inspect.");
   }
   // Only load a trusted local adapter explicitly selected by the developer.
   const selected = adapter ? (await import(pathToFileURL(adapter).href)).default : workflow;
@@ -68,7 +82,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   }
   let replayShown = false;
   function showCaseReplay(id) {
-    if (caseId || replayShown || typeof id !== "string" || !id) return;
+    if (caseIds.length === 1 || replayShown || typeof id !== "string" || !id) return;
     replayShown = true;
     const script = process.argv[1];
     const args = ["node", commandPath(script)];
@@ -81,17 +95,22 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     }
     console.log("Replay this case: " + words.join(" "));
   }
-  const items = caseId ? selected.cases.filter(item => item.id === caseId) : selected.cases;
-  const trials = caseId ? 3 : 1;
-  if (caseId) {
-    if (items.length !== 1) {
+  const focused = caseIds.length > 0;
+  const items = focused ? caseIds.map(id => {
+    const matches = selected.cases.filter(item => item.id === id);
+    if (matches.length !== 1) {
       const choices = selected.cases.map(item => item.id)
         .filter(id => typeof id === "string" && /^[A-Za-z0-9_.:/ -]{1,100}$/.test(id)).slice(0, 8);
-      const reason = items.length ? "The requested case ID is duplicated. Give each case a unique ID." : "Unknown case ID. Use an exact ID from the selected workflow.";
-      console.error(reason + (choices.length ? " Available IDs include " + choices.map(id => JSON.stringify(id)).join(", ") + "." : ""));
-      process.exit(2);
+      const label = /^[A-Za-z0-9_.:/ -]{1,100}$/.test(id) ? " " + JSON.stringify(id) : "";
+      const reason = matches.length ? "The requested case ID" + label + " is duplicated. Give each case a unique ID." : "Unknown case ID" + label + ". Use an exact ID from the selected workflow.";
+      invalidSelection(reason + (choices.length ? " Available IDs include " + choices.map(id => JSON.stringify(id)).join(", ") + "." : ""));
     }
-    console.log(`Checking only ${JSON.stringify(caseId)} for ${trials} trials. Run the full suite before sharing a result.`);
+    return matches[0];
+  }) : selected.cases;
+  const trials = focused ? 3 : 1;
+  if (focused) {
+    const scope = caseIds.length === 1 ? "only " + JSON.stringify(caseIds[0]) : caseIds.length + " selected cases";
+    console.log(`Checking ${scope} for ${trials} trials${caseIds.length > 1 ? " each" : ""}. Run the full suite before sharing a result.`);
   }
   let valuesFile;
   if (inspectValues) {
@@ -136,7 +155,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     }, 1000).unref();
   });
   function registerCase(item, repetition) {
-    const name = caseId ? `${item.id} (trial ${repetition + 1}/${trials})` : item.id;
+    const name = focused ? `${item.id} (trial ${repetition + 1}/${trials})` : item.id;
     test(name, { timeout: selected.timeoutMs }, async (t) => {
       const timings = inspectTools ? focusedToolTimings(repetition + 1) : null;
       const executeLocal = async (kind, label, callback) => {

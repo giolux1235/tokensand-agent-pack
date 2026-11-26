@@ -17,7 +17,11 @@ Use [Connect your agent](https://tokensand.com/agents/install?mode=developer), r
 
 The command above pins the plugin’s published MCP archive. For the current server release and setup instructions, see the [live manifest](https://tokensand.com/.well-known/tokensand-agent-pack.json). Restart the MCP session after changing its configuration.
 
-## Check one useful task
+## Check an AI workflow
+
+Open your project in Cursor and ask **“Use Tokens& to check this change and show me what failed.”** The bundled Node and Python runners work locally. To check several cases, name them in your request. For automatic checks on save or in GitHub, use the [project setup instructions](../../README.md#install-automatic-workflow-checks).
+
+## Find tools for your existing stack
 
 Ask: **“Keep Next.js, Supabase auth and pgvector. Add streaming answers. Find only what's missing, with docs.”**
 

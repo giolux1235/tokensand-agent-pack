@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test, { after } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -21,7 +21,7 @@ function packagedCli(version) {
 }
 
 const sourceCli = fileURLToPath(new URL("./cli.mjs", import.meta.url));
-const cli = existsSync(sourceCli) ? sourceCli : packagedCli("0.1.15");
+const cli = existsSync(sourceCli) ? sourceCli : packagedCli("0.1.17");
 function fixture(t, name = "observe.workflow.mjs", ids = ["blocks", "also-blocks"]) {
   const cwd = mkdtempSync(join(tmpdir(), "tokensand-focused-"));
   t.after(() => rmSync(cwd, {recursive:true,force:true}));
@@ -42,6 +42,82 @@ function hint(result) {
   assert.equal(commands.length,1,result.text);
   return commands[0][1];
 }
+
+function selectionFixture(t) {
+  const app = fixture(t);
+  const file = join(app.cwd, "observe.workflow.mjs");
+  const calls = join(app.cwd, "executed.jsonl");
+  writeFileSync(file, `import { appendFileSync } from "node:fs";
+    export default {maxCallsPerRun:{candidate:0}, checks:[{id:"correct",label:"Correct route"}],
+      cases:["passes","fails","--literal", "ambiguous", "ambiguous"].map(id=>({id,input:id})),
+      candidate:(input,ctx)=>{
+        appendFileSync("executed.jsonl", JSON.stringify([ctx.caseId,ctx.repetition])+"\\n");
+        return input !== "fails";
+      },evaluate:({output})=>({correct:output})};`);
+  return { ...app, calls, takeCalls() {
+    if (!existsSync(calls)) return [];
+    const observed = readFileSync(calls,"utf8").trim().split("\n").map(line => JSON.parse(line));
+    rmSync(calls);
+    return observed;
+  }};
+}
+
+test("every explicit case runs three times in argument order on the CLI and standalone checker", t => {
+  const { check, run, takeCalls } = selectionFixture(t);
+  const standalone = join(dirname(cli), "agent-check.mjs");
+  for (const invoke of [check, (...args) => run(process.execPath, [standalone, ...args])]) {
+    for (const ids of [["fails","passes"], ["passes","fails"], ["--literal","passes"]]) {
+      const result = invoke("--offline-workflow", "./observe.workflow.mjs", "--case=" + ids[0], "--case", ids[1]);
+      assert.equal(result.code,ids.includes("fails") ? 1 : 0,result.text);
+      assert.deepEqual(takeCalls(),ids.flatMap(id=>[0,1,2].map(repetition=>[id,repetition])));
+      if (ids.includes("fails")) assert.match(result.text,/fails \(trial 3\/3\)/);
+    }
+  }
+});
+
+test("invalid case, path and detail selections fail before any candidate callback", t => {
+  const { check, takeCalls } = selectionFixture(t);
+  for (const [args, message] of [
+    [["--case=passes","--case=missing"], /Unknown case ID "missing"/],
+    [["--case=missing","--case=passes"], /Unknown case ID "missing"/],
+    [["--case=passes","--case=ambiguous"], /"ambiguous" is duplicated/],
+    [["--case=passes","--case=passes"], /requested more than once/],
+    [["--case=passes","--case="], /case ID/],
+    [["--case=passes","--case"], /--case=ID/],
+    [["--offline-workflow=missing.mjs","--offline-workflow","./observe.workflow.mjs"], /workflow once/],
+    ...["--inspect-tools","--inspect-values"].map(flag => [["--case=fails","--case=passes",flag], /exactly one case/]),
+  ]) {
+    const result = check(...args);
+    assert.equal(result.code,2,result.text);
+    assert.match(result.text,message);
+    assert.deepEqual(takeCalls(),[]);
+    assert.doesNotMatch(result.text,/passed,|Private case values:|ERR_MODULE_NOT_FOUND/);
+  }
+});
+
+test("upgrades the shipped 0.1.16 runner without overwriting a customized copy", t => {
+  const previous = packagedCli("0.1.16");
+  for (const edited of [true,false]) {
+    const { check, cwd, run, takeCalls } = selectionFixture(t);
+    assert.equal(run(process.execPath,[previous,"--install-test"]).code,1);
+    takeCalls();
+    const runner = join(cwd,"tokensand-check.mjs");
+    if (edited) appendFileSync(runner,"\n// Custom team workflow.\n");
+    const before = readFileSync(runner);
+    const update = check("--install-test");
+    if (edited) {
+      assert.equal(update.code,2,update.text);
+      assert.deepEqual(readFileSync(runner),before);
+      assert.deepEqual(takeCalls(),[]);
+      continue;
+    }
+    assert.equal(update.code,1,update.text);
+    takeCalls();
+    const retry = run(process.execPath,[runner,"--case=fails","--case=passes"]);
+    assert.equal(retry.code,1,retry.text);
+    assert.deepEqual(takeCalls(),["fails","passes"].flatMap(id=>[0,1,2].map(repetition=>[id,repetition])));
+  }
+});
 
 test("standalone failed check prints a working replay for a quoted workflow path and exact ID", {skip:process.platform === "win32"}, t => {
   const filename = "owner's $WORKFLOW; example.mjs";

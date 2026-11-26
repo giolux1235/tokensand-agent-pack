@@ -7,13 +7,13 @@ Check an AI workflow change in your repository and see which cases failed.
 With your npm project open in Codex or Claude Code, paste this once.
 
 ```text
-Set up Tokens& once in this npm project. Reuse observe.workflow.mjs or create it around our actual workflow with named checks, synthetic tool responses and a zero provider budget. Run npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/da486954ffb90e63a708cc035e8702e2cedf6839/packages/tokensand-workflow-check-0.1.15.tgz --install-test. Append --github for a self-contained workflow at a GitHub repo root. Run npm test and show any failing cases. If the Git working tree started clean, commit only the setup locally, including a check that found a real bug. If Git needs my approval or the tree started dirty, leave my edits intact and list the setup files I need to commit. Keep results local unless I connect hosted reporting.
+Set up Tokens& once in this npm project. Reuse observe.workflow.mjs or create it around our actual workflow with named checks, synthetic tool responses and a zero provider budget. Run npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.17/tokensand-workflow-check-0.1.17.tgz --install-test. Append --github for a self-contained workflow at a GitHub repo root. Run npm test and show any failing cases. If the Git working tree started clean, commit only the setup locally, including a check that found a real bug. If Git needs my approval or the tree started dirty, leave my edits intact and list the setup files I need to commit. Keep results local unless I connect hosted reporting.
 ```
 
 To install from a terminal, run this from the GitHub repository root with a self-contained offline `observe.workflow.mjs` that exercises your app.
 
 ```sh
-npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/da486954ffb90e63a708cc035e8702e2cedf6839/packages/tokensand-workflow-check-0.1.15.tgz --install-test --github
+npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.17/tokensand-workflow-check-0.1.17.tgz --install-test --github
 ```
 
 Once the setup files are committed and pushed, teammates get the same checker on checkout. `npm test` runs it alongside the project’s tests. `npm run test:tokensand:watch` rechecks imported project files when you save, including after you fix a syntax or import error. Stop watching with Ctrl+C.
@@ -48,10 +48,20 @@ Local checks run without an account, provider key or MCP connection. If you have
 Use the same pinned private Node SDK for both runs. The reviewer recognizes 0.7.7 and 0.7.8. From a clean candidate checkout, choose the earlier release tag and its saved run. Declare the app code in `sourceFiles`. If the scorer changed, the reviewer flags the saved result for review.
 
 ```sh
-npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/bdd369be19bb122676cc250a4c38bee9cbbb49f3/packages/tokensand-workflow-check-0.1.16.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
+npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.17/tokensand-workflow-check-0.1.17.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
 ```
 
-Open `review.html` to see each case, its scores and both Git revisions. Share the note when ready. A teammate saves it in a trusted checkout of the candidate and runs the command shown for a case. For repeated offline replay, install the pinned archive in your Node toolchain once and use the shorter `tokensand-check` command in the note. The `npx` release URL can need a network connection even after its first run. The public checker runs three fresh trials per revision with the original scorer. It can reproduce self-contained cases without your private SDK, journals or account. A clean replay with fewer trials than the original is inconclusive. A regression exits 100, incomplete evidence exits 2 and passing checks exit 0.
+Open `review.html` to see the blocking cases, their scores and both Git revisions. Review the case names before sharing the note. Keep your run directories and private inputs and outputs on your machine.
+
+A teammate can save the note as `review.html` and run this in the trusted candidate service checkout with both Git revisions available locally.
+
+```sh
+npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.17/tokensand-workflow-check-0.1.17.tgz --recheck-release ./review.html --all-cases --run
+```
+
+This rechecks every case **in the note**, three times per revision, using the earlier scorer. To narrow the selection, replace `--all-cases` with one or more `--case ID` flags. Self-contained workflows need no private SDK or account for replay. For offline use, install the pinned archive once and use `tokensand-check` in place of `npx --yes URL`.
+
+Release review and replay exit `100` for a verified regression, `2` for inconclusive evidence and `0` when all selected cases pass. Omit `--run` to inspect a received note without executing project code. That preview also exits `2`. Three fresh passing trials leave a case inconclusive if the original check used more.
 
 ### Review an existing Python test
 
@@ -81,10 +91,10 @@ Save the checker for your language in your repository. Run it with your own trus
 
 | Download | Command |
 | --- | --- |
-| [Node.js checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.15/tokensand-first.test.mjs) | `node tokensand-first.test.mjs --offline-workflow ./observe.workflow.mjs` |
-| [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.5/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
+| [Node.js checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.17/tokensand-first.test.mjs) | `node tokensand-first.test.mjs --offline-workflow ./observe.workflow.mjs` |
+| [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.6/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
 
-Append `--case CASE_ID --inspect-values` to see three trials. Open the private file printed by the checker for each returned value and the expected value when the case supplies one. Delete the file after debugging.
+By default the checker runs every case once. Append `--case ID_A --case ID_B` to run each named case three times. An ordinary local check exits `0` when its checks pass and `1` on a failed or unscored check. An invalid case selection exits `2`. For expected and actual values, select one case with `--case CASE_ID --inspect-values` and open the private file it prints. Delete it after debugging.
 
 If a hosted reservation reports 20 retained comparisons, use the command above for your trusted, offline candidate. It checks your current code immediately and keeps the result on your machine. Preserve the original run directory for hosted review.
 
@@ -107,7 +117,7 @@ For Claude Code, use `.claude/skills` in the same command. You can also [downloa
 In your project’s virtual environment, install the checker and run your trusted local workflow:
 
 ```sh
-python3 -m pip install https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/0a6d1c9254d9b41a7888e1df29a358fc656952b5/packages/tokensand_workflow_check-0.1.5-py3-none-any.whl
+python3 -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.6/tokensand_workflow_check-0.1.6-py3-none-any.whl
 python3 -m tokensand_check --offline-workflow ./my_workflow.py
 ```
 
@@ -117,12 +127,12 @@ Try the [SQLite sync example](examples/incremental-sync.py) as `my_workflow.py`.
 
 Open your [GitHub-synced Lovable project](https://docs.lovable.dev/integrations/github) in Codex or Claude Code. A local check needs no Tokens& account, gateway key or skill install. Copy this request into the agent:
 
-> Use Tokens& to check my change locally. Run the existing offline workflow test if it covers this change. Otherwise create observe.workflow.mjs around the changed app function with synthetic model replies or tool results, expected outcomes, named checks and a zero provider budget, then run npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/da486954ffb90e63a708cc035e8702e2cedf6839/packages/tokensand-workflow-check-0.1.15.tgz --offline-workflow ./observe.workflow.mjs. Show which cases failed and why.
+> Use Tokens& to check my change locally. Run the existing offline workflow test if it covers this change. Otherwise create observe.workflow.mjs around the changed app function with synthetic model replies or tool results, expected outcomes, named checks and a zero provider budget, then run npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.17/tokensand-workflow-check-0.1.17.tgz --offline-workflow ./observe.workflow.mjs. Show which cases failed and why.
 
 Before connecting a Node workflow, check the tool and step labels reached by its candidate cases:
 
 ```sh
-npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/da486954ffb90e63a708cc035e8702e2cedf6839/packages/tokensand-workflow-check-0.1.15.tgz --offline-workflow ./observe.workflow.mjs --require-hosted-labels
+npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.17/tokensand-workflow-check-0.1.17.tgz --offline-workflow ./observe.workflow.mjs --require-hosted-labels
 ```
 
 A label warning names the required format and keeps the label private. The optional flag exits 2 for incompatible labels or when no instrumented call ran. A connected run verifies the full experiment.
