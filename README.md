@@ -2,9 +2,29 @@
 
 Check an AI workflow change in your repository and see which cases failed.
 
+## Install automatic workflow checks
+
+In a trusted npm project with an offline `observe.workflow.mjs`, run this once from the repository root:
+
+```sh
+npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/82d4a465aa88ebf204dda8df9bebc7b7fd6b1d3c/packages/tokensand-workflow-check-0.1.12.tgz --install-test --github
+```
+
+Commit the generated changes. Teammates get the same checker on checkout. `npm test` runs it alongside the project’s tests. `npm run test:tokensand:watch` checks again when you save an imported file. Stop watching with Ctrl+C.
+
+GitHub runs self-contained cases on pull requests and default-branch pushes. The job has read-only repository access, with networking disabled during evaluation. Its summary shows case counts and the tested revision. Omit `--github` for a local-only install or a service inside a monorepo. To disconnect, revert the setup changes.
+
+**No workflow file yet?** In Codex or Claude Code, ask **“Set up Tokens& checks for this app. Create observe.workflow.mjs around the real workflow with synthetic inputs, expected outcomes and a zero provider budget, then install the recurring checks from the Tokens& Agent Pack README.”**
+
 ## Check a change with Codex or Claude Code
 
-From your project directory, install the skill for the agent you use.
+To make the skill available in every local project, install it once for both hosts:
+
+```sh
+npx --yes skills@1.9.0 add giolux1235/tokensand-agent-pack --skill tokensand-agent-pack --agent codex claude-code --global --yes
+```
+
+To limit the skill to one repository, run this from that project directory.
 
 ```sh
 npx --yes skills@1.9.0 add giolux1235/tokensand-agent-pack --skill tokensand-agent-pack --agent codex -y
@@ -95,7 +115,7 @@ For a working example, copy the [six-case quiz check](examples/lovable-study-rev
 
 ### Review a pull request
 
-Save the [starter workflow](examples/github/starter-check.yml) as `.github/workflows/tokensand-starter.yml` in your repository. Commit it, your app changes and the offline `observe.workflow.mjs` you want to check. From that checkout, run the public checker.
+The automatic setup above runs self-contained Node cases on each PR. For workflows that need locally installed dependencies, you can share a revision-bound receipt instead. Save the [starter workflow](examples/github/starter-check.yml) as `.github/workflows/tokensand-starter.yml` in your repository. Commit it, your app changes and the offline `observe.workflow.mjs` you want to check. From that checkout, run the public checker.
 
 ```sh
 npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/2d6f77ae7e74aaedd9071334e3a23f0b6bbe717b/packages/tokensand-workflow-check-0.1.11.tgz --pr-receipt
