@@ -12,7 +12,7 @@ SCRIPT = ROOT / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/script
 
 class PythonRelease(unittest.TestCase):
     def test_shipped_runner(self):
-        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.5-py3-none-any.whl") as wheel:
+        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.6-py3-none-any.whl") as wheel:
             self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
         for repair, outage, code, message in [
             ("0", "0", 1, "Failed checks: Return every remaining record"),
@@ -28,6 +28,18 @@ class PythonRelease(unittest.TestCase):
                 self.assertEqual(run.returncode, code, run.stderr)
                 self.assertIn(message, run.stderr)
                 self.assertNotIn("private fixture detail", run.stderr)
+
+    def test_named_cases_catch_the_cursor_bug_in_either_order(self):
+        for first, second in [("initial", "resume-tied-page"), ("resume-tied-page", "initial")]:
+            with self.subTest(first=first), tempfile.TemporaryDirectory() as project:
+                run = subprocess.run(
+                    [sys.executable, "-I", "-B", SCRIPT, "--offline-workflow", ROOT / "examples/incremental-sync.py",
+                     "--case", first, "--case", second],
+                    cwd=project, capture_output=True, text=True, env={**os.environ, "FIX_CURSOR": "0", "ORACLE_DOWN": "0"},
+                )
+                self.assertEqual(run.returncode, 1, run.stderr)
+                self.assertIn("Ran 6 tests", run.stderr)
+                self.assertIn("failures=3", run.stderr)
 
     def test_repetitions_isolate_a_consumed_grader_input(self):
         import runpy

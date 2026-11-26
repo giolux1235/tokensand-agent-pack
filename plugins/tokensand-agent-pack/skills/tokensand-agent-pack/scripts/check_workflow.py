@@ -55,15 +55,22 @@ def case_suite(definition, case_id=None, inspect_values=False):
         raise ValueError("Provide at least one case and one named check.")
     trials = 1
     if case_id is not None:
-        items = [case for case in items if case["id"] == case_id]
-        if not case_id or len(items) != 1:
-            raise ValueError(f"Expected one case with exact ID {case_id!r}. Found {len(items)}.")
+        requested = [case_id] if isinstance(case_id, str) else case_id
+        if not requested or len(set(requested)) != len(requested):
+            raise ValueError("Choose each case ID once.")
+        selected = []
+        for name in requested:
+            matches = [case for case in items if case["id"] == name]
+            if not name or len(matches) != 1:
+                raise ValueError(f"Expected one case with exact ID {name!r}. Found {len(matches)}.")
+            selected.append(matches[0])
+        items = selected
         trials = 3
 
     values_path = None
     if inspect_values:
-        if case_id is None:
-            raise ValueError("--inspect-values requires --case CASE_ID.")
+        if case_id is None or len(items) != 1:
+            raise ValueError("--inspect-values requires one --case CASE_ID.")
         with tempfile.NamedTemporaryFile(prefix="tokensand-case-", suffix=".jsonl", delete=False) as handle:
             values_path = Path(handle.name)
         preview = ValuePreview()
@@ -125,14 +132,16 @@ def load_tests(loader, tests, pattern):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Check every offline case once, or repeat one case three times.")
-    parser.add_argument("--offline-workflow", type=Path, help="Trusted local Python file exporting a workflow dictionary.")
-    parser.add_argument("--case", help="Exact ID of the case to repeat three times.")
+    parser.add_argument("--offline-workflow", type=Path, action="append", help="Trusted local Python file exporting a workflow dictionary.")
+    parser.add_argument("--case", action="append", help="Exact case ID to repeat three times. Repeat --case to select more cases.")
     parser.add_argument("--inspect-values", action="store_true", help="Save local expected and actual value previews for one case.")
     args = parser.parse_args()
-    if args.inspect_values and not args.case:
-        parser.error("--inspect-values requires --case CASE_ID.")
+    if args.inspect_values and len(args.case or []) != 1:
+        parser.error("--inspect-values requires one --case CASE_ID.")
     if args.offline_workflow:
-        path = args.offline_workflow.resolve()
+        if len(args.offline_workflow) != 1:
+            parser.error("Supply one --offline-workflow path.")
+        path = args.offline_workflow[0].resolve()
         sys.path.insert(0, str(path.parent))
         workflow = runpy.run_path(str(path))["workflow"]
     try:
