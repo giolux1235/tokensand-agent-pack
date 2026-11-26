@@ -23,4 +23,4 @@ jobs:
         with:
           node-version: '22.22.0'
       - name: Verify editor saves against the published installer
-        run: python tests/editor-save-trial.py packages/tokensand-workflow-check-0.1.14.tgz
+        run: python tests/editor-save-trial.py packages/tokensand-workflow-check-0.1.15.tgz
