@@ -22,7 +22,8 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           Set-Location $env:RUNNER_TEMP
           $archive = Join-Path $PWD "tokensand-workflow-check-0.1.13.tgz"
-          Invoke-WebRequest "https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/2f9ddd41ec897c2668179ffd2c703446e26f8ecd/packages/tokensand-workflow-check-0.1.13.tgz" -OutFile $archive
+          $releaseUrl="https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/2f9ddd41ec897c2668179ffd2c703446e26f8ecd/packages/tokensand-workflow-check-0.1.13.tgz"
+          Invoke-WebRequest $releaseUrl -OutFile $archive
           if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne "e8c8e94094be3d6bd9d0f4eea109386adbc84324cd86f89c0eb12bafc101fc65") { throw "Release hash mismatch" }
           $app = New-Item -ItemType Directory -Path "ledger check"
           Set-Location $app
@@ -41,7 +42,7 @@ jobs:
           }
           '@ | Set-Content lookup.mjs
           $scorer=(Get-FileHash observe.workflow.mjs).Hash
-          $install=(& npx --yes $archive --install-test 2>&1 | Out-String)
+          $install=(& npx --yes $releaseUrl --install-test 2>&1 | Out-String)
           $status=$LASTEXITCODE
           if ($env:GITHUB_EVENT_NAME -eq "pull_request") {
             if ($status -ne 2 -or $install -notmatch "no cases evaluated") { throw "Expected an unscored PR install. Exit $status." }
