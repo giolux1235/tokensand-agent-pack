@@ -15,6 +15,8 @@ For pytest JUnit reports: `python3 SKILL_DIR/scripts/review_pytest.py BEFORE.xml
 
 Inspect trusted adapters for network calls before running them.
 
+When asked to connect a project once, reuse its real offline `observe.workflow.mjs` or create one around its workflow and expected results with a zero provider budget. Run `npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/82d4a465aa88ebf204dda8df9bebc7b7fd6b1d3c/packages/tokensand-workflow-check-0.1.12.tgz --install-test` in the npm project. Add `--github` at the Git repository root for self-contained cases on PRs and default-branch pushes. Check the result, show any failed case and identify the setup files to commit. Subsequent changes use `npm test` or `npm run test:tokensand:watch`. Hosted reporting and project publication remain separate choices.
+
 The skill bundles two local runners. Resolve `SKILL_DIR` to the directory containing this SKILL.md. From the service directory, run the command matching its trusted adapter:
 
 - Node default export: `node SKILL_DIR/scripts/check_workflow.mjs --offline-workflow ./observe.workflow.mjs`.
