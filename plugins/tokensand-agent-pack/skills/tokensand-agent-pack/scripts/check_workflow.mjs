@@ -107,7 +107,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     }
     return matches[0];
   }) : selected.cases;
-  const trials = focused ? 3 : 1;
+  const definedTrials = Object.hasOwn(selected, "repetitions") ? selected.repetitions : 1;
+  if (!Number.isInteger(definedTrials) || definedTrials < 1 || definedTrials > 10) {
+    invalidSelection("Set workflow repetitions to a whole number from 1 to 10.");
+  }
+  const trials = focused ? Math.max(3, definedTrials) : definedTrials;
   if (focused) {
     const scope = caseIds.length === 1 ? "only " + JSON.stringify(caseIds[0]) : caseIds.length + " selected cases";
     console.log(`Checking ${scope} for ${trials} trials${caseIds.length > 1 ? " each" : ""}. Run the full suite before sharing a result.`);
@@ -155,7 +159,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     }, 1000).unref();
   });
   function registerCase(item, repetition) {
-    const name = focused ? `${item.id} (trial ${repetition + 1}/${trials})` : item.id;
+    const label = trials > 1 ? `${item.id} (trial ${repetition + 1}/${trials})` : item.id;
+    // The private receipt reporter groups complete trials by exact case ID.
+    const name = process.env.TOKENSAND_STARTER_COUNTS
+      ? JSON.stringify([item.id, repetition + 1, trials]) : label;
     test(name, { timeout: selected.timeoutMs }, async (t) => {
       const timings = inspectTools ? focusedToolTimings(repetition + 1) : null;
       const executeLocal = async (kind, label, callback) => {

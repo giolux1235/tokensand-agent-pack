@@ -20,12 +20,12 @@ jobs:
         shell: bash
         env:
           EXPECTED_PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          STARTER_URL: https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/2d6f77ae7e74aaedd9071334e3a23f0b6bbe717b/packages/tokensand-workflow-check-0.1.11.tgz
+          STARTER_URL: https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.18/tokensand-workflow-check-0.1.18.tgz
         run: |
           temp=$(mktemp -d "$RUNNER_TEMP/tokensand-starter.XXXXXX")
           trap 'rm -rf -- "$temp"' EXIT
-          if ! curl --fail --silent --show-error --max-time 20 --proto '=https' "$STARTER_URL" -o "$temp/check.tgz" ||
-             ! echo "263386d93e21975a75632a430f709b44edf866324db32c98e98db16d34f3bcca  $temp/check.tgz" | sha256sum --check --status ||
+          if ! curl --fail --silent --show-error --location --proto-redir '=https' --max-time 20 --proto '=https' "$STARTER_URL" -o "$temp/check.tgz" ||
+             ! echo "09678687d0a8fd172d1f7c6e09f8101c0f3b5811430f98ad534a57fce6802b9c  $temp/check.tgz" | sha256sum --check --status ||
              ! tar -xOzf "$temp/check.tgz" package/starter-pr.mjs > "$temp/verify.mjs"; then
             printf '## Tokens& starter cases\n\nStatus: **verifier unavailable**\nNext: Rerun this job when the pinned public package is available.\n' >> "$GITHUB_STEP_SUMMARY"
             exit 1

@@ -53,7 +53,9 @@ def case_suite(definition, case_id=None, inspect_values=False):
     items = definition["cases"]
     if not items or not definition["checks"]:
         raise ValueError("Provide at least one case and one named check.")
-    trials = 1
+    trials = definition.get("repetitions", 1)
+    if type(trials) is not int or not 1 <= trials <= 10:
+        raise ValueError("repetitions must be an integer from 1 to 10.")
     if case_id is not None:
         requested = [case_id] if isinstance(case_id, str) else case_id
         if not requested or len(set(requested)) != len(requested):
@@ -65,7 +67,7 @@ def case_suite(definition, case_id=None, inspect_values=False):
                 raise ValueError(f"Expected one case with exact ID {name!r}. Found {len(matches)}.")
             selected.append(matches[0])
         items = selected
-        trials = 3
+        trials = max(3, trials)
 
     values_path = None
     if inspect_values:
@@ -120,7 +122,7 @@ def case_suite(definition, case_id=None, inspect_values=False):
                     raise AssertionError("\n".join(reasons))
 
             check.__name__ = str(case["id"])
-            if case_id is not None:
+            if trials > 1:
                 check.__name__ += f" (trial {trial}/{trials})"
             suite.addTest(unittest.FunctionTestCase(check))
     return suite
@@ -131,9 +133,9 @@ def load_tests(loader, tests, pattern):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Check every offline case once, or repeat one case three times.")
+    parser = argparse.ArgumentParser(description="Run each offline case for its configured repetitions (default: once).")
     parser.add_argument("--offline-workflow", type=Path, action="append", help="Trusted local Python file exporting a workflow dictionary.")
-    parser.add_argument("--case", action="append", help="Exact case ID to repeat three times. Repeat --case to select more cases.")
+    parser.add_argument("--case", action="append", help="Exact case ID to run at least three times. Repeat --case to select more cases.")
     parser.add_argument("--inspect-values", action="store_true", help="Save local expected and actual value previews for one case.")
     args = parser.parse_args()
     if args.inspect_values and len(args.case or []) != 1:

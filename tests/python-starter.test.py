@@ -11,8 +11,30 @@ SCRIPT = ROOT / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/script
 
 
 class PythonRelease(unittest.TestCase):
+    def test_declared_trials_expose_intermittent_failure(self):
+        import runpy
+        case_suite = runpy.run_path(str(SCRIPT))["case_suite"]
+        for broken in (True, False):
+            seen = []
+            def candidate(item):
+                seen.append(item)
+                return not (broken and item == "late-index" and seen.count(item) == 2)
+
+            workflow = {
+                "cases": [{"id": item, "input": item} for item in ("steady-control", "late-index")],
+                "repetitions": 3,
+                "checks": [{"id": "found"}],
+                "candidate": candidate,
+                "evaluate": lambda _, output, variant: {"found": output},
+            }
+            result = unittest.TestResult()
+            case_suite(workflow).run(result)
+            self.assertEqual((result.testsRun, len(result.failures), len(result.errors)), (6, int(broken), 0))
+            if broken:
+                self.assertIn("late-index (trial 2/3)", str(result.failures[0][0]))
+
     def test_shipped_runner(self):
-        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.6-py3-none-any.whl") as wheel:
+        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.7-py3-none-any.whl") as wheel:
             self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
         for repair, outage, code, message in [
             ("0", "0", 1, "Failed checks: Return every remaining record"),

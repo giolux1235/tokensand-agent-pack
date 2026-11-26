@@ -21,7 +21,7 @@ function packagedCli(version) {
 }
 
 const sourceCli = fileURLToPath(new URL("./cli.mjs", import.meta.url));
-const cli = existsSync(sourceCli) ? sourceCli : packagedCli("0.1.17");
+const cli = existsSync(sourceCli) ? sourceCli : packagedCli("0.1.18");
 function fixture(t, name = "observe.workflow.mjs", ids = ["blocks", "also-blocks"]) {
   const cwd = mkdtempSync(join(tmpdir(), "tokensand-focused-"));
   t.after(() => rmSync(cwd, {recursive:true,force:true}));
@@ -42,6 +42,38 @@ function hint(result) {
   assert.equal(commands.length,1,result.text);
   return commands[0][1];
 }
+
+test("the whole workflow catches a failure on a later configured trial", t => {
+  const { cwd, check } = fixture(t);
+  const path = join(cwd, "observe.workflow.mjs");
+  const writeWorkflow = (repetitions, fixed) => writeFileSync(path, `export default {
+    ${repetitions} maxCallsPerRun: {candidate: 0},
+    cases: [{ id: "control" }, { id: "search" }],
+    checks: [{ id: "found", label: "Return a matching document" }],
+    candidate: (_, ctx) => ${fixed} || ctx.caseId === "control" || ctx.repetition !== 1,
+    evaluate: ({output}) => ({ found: output })
+  };`);
+  const args = ["--offline-workflow", "./observe.workflow.mjs"];
+  writeWorkflow("repetitions: 3,", false);
+  const broken = check(...args);
+  assert.equal(broken.code, 1, broken.text);
+  assert.match(broken.text, /FAIL search \(trial 2\/3\)/);
+  assert.match(broken.text, /5 passed, 1 failed/);
+  writeWorkflow("repetitions: 3,", true);
+  assert.match(check(...args).text, /6 passed, 0 failed/);
+  writeWorkflow("repetitions: 5,", true);
+  assert.match(check(...args, "--case=search").text, /5 passed, 0 failed/);
+  writeWorkflow("", true);
+  assert.match(check(...args).text, /2 passed, 0 failed/);
+  assert.match(check(...args, "--case=search").text, /3 passed, 0 failed/);
+  for (const invalid of ["0", "11", "null", "true", "'3'", "1.5"]) {
+    writeWorkflow("repetitions: " + invalid + ",", false);
+    const result = check(...args);
+    assert.equal(result.code, 2, result.text);
+    assert.match(result.text, /workflow repetitions/);
+    assert.doesNotMatch(result.text, /\d+ passed/);
+  }
+});
 
 function selectionFixture(t) {
   const app = fixture(t);
