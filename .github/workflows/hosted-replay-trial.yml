@@ -1,0 +1,55 @@
+name: Published workflow checker rehearsal
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  replay:
+    name: Replay a workflow on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Install the public checker and rerun a timed-out call
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $false
+          Set-Location $env:RUNNER_TEMP
+          $archive = Join-Path $PWD "tokensand-workflow-check-0.1.13.tgz"
+          Invoke-WebRequest "https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/2f9ddd41ec897c2668179ffd2c703446e26f8ecd/packages/tokensand-workflow-check-0.1.13.tgz" -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne "e8c8e94094be3d6bd9d0f4eea109386adbc84324cd86f89c0eb12bafc101fc65") { throw "Release hash mismatch" }
+          $app = New-Item -ItemType Directory -Path "ledger check"
+          Set-Location $app
+          @'
+          import settle from './lookup.mjs';
+          export default {timeoutMs:450,maxCallsPerRun:{candidate:0},candidate:settle,
+            cases:[{id:'noop',input:0},{id:'ledger-lookup',input:2}],
+            checks:[{id:'total'}],evaluate:({input,output})=>({total:output===input})};
+          '@ | Set-Content observe.workflow.mjs
+          @'
+          import {setTimeout as wait} from 'node:timers/promises';
+          export default async function settle(n,ctx) {
+            if (!n) return 0;
+            const rows=await ctx.tool('list-transfers',()=>wait(5,n,{signal:ctx.signal}));
+            return ctx.tool('fetch-ledger-page',()=>wait(1200,rows,{signal:ctx.signal}));
+          }
+          '@ | Set-Content lookup.mjs
+          $scorer=(Get-FileHash observe.workflow.mjs).Hash
+          $install=(& npx --yes $archive --install-test 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 1) { throw "Expected the first evaluation to fail" }
+          $match=[regex]::Match($install,'(?m)^Replay this case: (.+?)\s*$')
+          if (!$match.Success) { throw "No exact replay command" }
+          $replay=$match.Groups[1].Value
+          if ($replay -notmatch '^node ["'']?\.[/\\]tokensand-check\.mjs["'']?(?: --offline-workflow ["'']?\.[/\\]observe\.workflow\.mjs["'']?)? --case=ledger-lookup --inspect-tools$') { throw "Unexpected replay syntax" }
+          $failed=(Invoke-Expression $replay 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 1 -or ([regex]::Matches($failed,'fetch-ledger-page — still running')).Count -ne 3) { throw "Missing failed tool diagnosis" }
+          (Get-Content lookup.mjs -Raw).Replace('wait(1200,rows','wait(7,rows') | Set-Content lookup.mjs
+          $fixed=(Invoke-Expression $replay 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0 -or ([regex]::Matches($fixed,'fetch-ledger-page — returned')).Count -ne 3) { throw "Repair did not pass focused replay" }
+          $suite=(& npm test 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0 -or $suite -notmatch '(?:pass|passed) 2') { throw "Full suite did not pass both cases" }
+          if ($scorer -ne (Get-FileHash observe.workflow.mjs).Hash) { throw "Evaluator changed" }
+          "Verified public Tokens& 0.1.13 using $(node --version) on $env:RUNNER_OS. First check failed, 3/3 replays identified the outstanding ledger tool, 3/3 passed after a one-line repair, and the complete 2/2 suite passed." >> $env:GITHUB_STEP_SUMMARY
