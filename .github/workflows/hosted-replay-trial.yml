@@ -1,5 +1,8 @@
 name: Published workflow checker rehearsal
-on: pull_request
+on:
+  pull_request:
+  push:
+    branches: [codex/hosted-os-replay-trial]
 permissions:
   contents: read
 jobs:
@@ -39,7 +42,13 @@ jobs:
           '@ | Set-Content lookup.mjs
           $scorer=(Get-FileHash observe.workflow.mjs).Hash
           $install=(& npx --yes $archive --install-test 2>&1 | Out-String)
-          if ($LASTEXITCODE -ne 1) { throw "Expected the first evaluation to fail" }
+          $status=$LASTEXITCODE
+          if ($env:GITHUB_EVENT_NAME -eq "pull_request") {
+            if ($status -ne 2 -or $install -notmatch "no cases evaluated") { throw "Expected an unscored PR install. Exit $status." }
+            "The in-repository checker declined the PR event with exit 2. The isolated PR workflow is the supported PR path." >> $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+          if ($status -ne 1) { throw "Expected the first evaluation to fail. Exit $status. $install" }
           $match=[regex]::Match($install,'(?m)^Replay this case: (.+?)\s*$')
           if (!$match.Success) { throw "No exact replay command" }
           $replay=$match.Groups[1].Value
