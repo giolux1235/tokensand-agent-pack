@@ -51,7 +51,7 @@ From a clean candidate checkout with your pinned private Node SDK 0.7.7, choose 
 npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/9cfe849e7bc6d49cdf927b4490e08075bcf14b09/packages/tokensand-workflow-check-0.1.14.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
 ```
 
-Open `review.html` to see each case, its scores and both Git revisions. Share the note when ready. A teammate saves it in a trusted checkout of the candidate and runs the command shown for a case. The public checker runs three fresh trials per revision with the original scorer. It can reproduce self-contained cases without your private SDK, journals or account. A clean replay with fewer trials than the original is inconclusive. A regression exits 100, incomplete evidence exits 2 and passing checks exit 0.
+Open `review.html` to see each case, its scores and both Git revisions. Share the note when ready. A teammate saves it in a trusted checkout of the candidate and runs the command shown for a case. For repeated offline replay, install the pinned archive in your Node toolchain once and use the shorter `tokensand-check` command in the note. The `npx` release URL can need a network connection even after its first run. The public checker runs three fresh trials per revision with the original scorer. It can reproduce self-contained cases without your private SDK, journals or account. A clean replay with fewer trials than the original is inconclusive. A regression exits 100, incomplete evidence exits 2 and passing checks exit 0.
 
 ### Review an existing Python test
 
