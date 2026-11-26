@@ -21,7 +21,7 @@ function packagedCli(version) {
 }
 
 const sourceCli = fileURLToPath(new URL("./cli.mjs", import.meta.url));
-const cli = existsSync(sourceCli) ? sourceCli : packagedCli("0.1.13");
+const cli = existsSync(sourceCli) ? sourceCli : packagedCli("0.1.15");
 function fixture(t, name = "observe.workflow.mjs", ids = ["blocks", "also-blocks"]) {
   const cwd = mkdtempSync(join(tmpdir(), "tokensand-focused-"));
   t.after(() => rmSync(cwd, {recursive:true,force:true}));
@@ -119,14 +119,18 @@ test("upgrades the exact released runner and preserves a teammate's customized r
     if (edited) {
       assert.equal(upgrade.code, 2, upgrade.text);
       assert.deepEqual(readFileSync(installed), priorRunner);
+      assert.deepEqual(readFileSync(join(cwd, "package.json")), manifest);
       assert.equal(existsSync(join(cwd, ".github")), false);
     } else {
       assert.equal(upgrade.code, 1, upgrade.text);
       assert.notDeepEqual(readFileSync(installed), priorRunner);
+      const oldWatch = "node --watch tokensand-check.mjs";
+      assert.equal(JSON.parse(manifest).scripts["test:tokensand:watch"], oldWatch);
+      const expected = manifest.toString().replace(JSON.stringify(oldWatch), JSON.stringify("node tokensand-check.mjs --watch-workflow"));
+      assert.equal(readFileSync(join(cwd, "package.json"), "utf8"), expected);
       const next = run("npm", ["test"]);
       assert.equal(next.code, 1, next.text);
       assert.match(hint(next), /--case=blocks --inspect-tools/);
     }
-    assert.deepEqual(readFileSync(join(cwd, "package.json")), manifest);
   }
 });
