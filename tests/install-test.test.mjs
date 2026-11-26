@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const name = "tokensand-workflow-check-0.1.13.tgz";
+const name = "tokensand-workflow-check-0.1.14.tgz";
 const archive = [new URL("../packages/" + name, import.meta.url), new URL("./distribution/" + name, import.meta.url)]
   .map(fileURLToPath).find(existsSync);
 const adapter = `import decide from "./app.mjs";
