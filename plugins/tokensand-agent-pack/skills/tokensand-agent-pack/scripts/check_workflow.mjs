@@ -35,8 +35,8 @@ const workflow = {
 export default workflow;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  const { values: { "offline-workflow": adapter, case: caseId, "inspect-values": inspectValues } } = parseArgs({
-    options: { "offline-workflow": { type: "string" }, case: { type: "string" }, "inspect-values": { type: "boolean" } },
+  const { values: { "offline-workflow": adapter, case: caseId, "inspect-values": inspectValues, "require-hosted-labels": requireHostedLabels } } = parseArgs({
+    options: { "offline-workflow": { type: "string" }, case: { type: "string" }, "inspect-values": { type: "boolean" }, "require-hosted-labels": { type: "boolean" } },
   });
   assert.ok(adapter !== "" && caseId !== "", "Supply a workflow path or case ID after its option.");
   assert.ok(!inspectValues || caseId, "--inspect-values requires --case CASE_ID.");
@@ -61,8 +61,28 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     return inspect(value, { customInspect: false, getters: false, depth: 2,
       maxArrayLength: 12, maxStringLength: 256, colors: false }).slice(0, 2048);
   }
+  let observedLabels = 0;
+  let invalidHostedLabel = false;
+  function checkLabel(kind, label) {
+    observedLabels++;
+    const valid = typeof label === "string" && (kind === "step"
+      ? /^[a-z][a-z0-9_]{0,63}$/.test(label)
+      : /^[a-z][a-z0-9_-]{0,39}$/.test(label) && !/(?:^|[^a-z0-9])(?:sk[-_]|tobs_|dai_|tvly-)/i.test(label));
+    if (!valid && !invalidHostedLabel) {
+      invalidHostedLabel = true;
+      console.error("Hosted label warning: an executed step or tool label would be rejected. Use a fixed, non-sensitive lowercase name starting with a letter. Tools allow digits, hyphens and underscores (40 characters total). Steps allow digits and underscores (64 total). For example, ctx.tool('inventory-get', callback). Rerun with --require-hosted-labels.");
+    }
+  }
   let interrupted = false;
   test.after(() => {
+    if (requireHostedLabels) {
+      if (invalidHostedLabel || !observedLabels) {
+        console.error(invalidHostedLabel ? "Hosted label check failed." : "No step or tool labels ran. Exercise an instrumented candidate path.");
+        process.exitCode ||= 2;
+      } else {
+        console.log(`Hosted label syntax passed for ${observedLabels} executed candidate calls. A connected run checks the baseline and hosted scoring.`);
+      }
+    }
     if (!interrupted) return;
     // A callback can ignore its abort signal and leave a socket open. Allow
     // normal teardown and reporter completion first. Successful tests must
@@ -76,14 +96,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     const name = caseId ? `${item.id} (trial ${repetition + 1}/${trials})` : item.id;
     test(name, { timeout: selected.timeoutMs }, async (t) => {
       // Execute the adapter's local callbacks without recording or sending spans.
-      const executeLocal = async (_label, callback) => {
+      const executeLocal = async (kind, label, callback) => {
         t.signal.throwIfAborted();
+        checkLabel(kind, label);
         return callback();
       };
       let attemptedFetch = false;
       const context = {
         caseId: item.id, repetition, sessionId: randomUUID(), signal: t.signal,
-        step: executeLocal, tool: executeLocal,
+        step: (label, callback) => executeLocal("step", label, callback),
+        tool: (label, callback) => executeLocal("tool", label, callback),
         fetch: async () => {
           attemptedFetch = true;
           throw new Error("Provider transport is disabled for this offline check.");
