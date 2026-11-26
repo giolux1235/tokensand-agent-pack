@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const name = "tokensand-workflow-check-0.1.14.tgz";
+const name = "tokensand-workflow-check-0.1.15.tgz";
 const archive = [new URL("../packages/" + name, import.meta.url), new URL("./distribution/" + name, import.meta.url)]
   .map(fileURLToPath).find(existsSync);
 const adapter = `import decide from "./app.mjs";
@@ -114,7 +114,7 @@ test("a project without package.json gains a portable check and a positive provi
   assert.equal(install().status,0);
   assert.equal(JSON.parse(text("package.json")).scripts.test,"npm run test:tokensand");
   assert.equal(run("npm",["test"],repo,{GITHUB_ACTIONS:"true",GITHUB_EVENT_NAME:"pull_request"}).status,2);
-  assert.equal(JSON.parse(text("package.json")).scripts["test:tokensand:watch"],"node --watch tokensand-check.mjs");
+  assert.equal(JSON.parse(text("package.json")).scripts["test:tokensand:watch"],"node tokensand-check.mjs --watch-workflow");
   file("observe.workflow.mjs",adapter.replace("candidate:0","candidate:1"));
   const unconfigured = run("npm",["test"]);
   assert.equal(unconfigured.status,1);
@@ -173,6 +173,89 @@ test("a saved app repair reruns in the same watch process", {skip:process.platfo
       process.kill(-child.pid,"SIGTERM");
       await closed;
     }
+  }
+});
+
+test("ordinary and atomic syntax repairs re-run only when a local workflow source changes", { timeout:20000 }, async t => {
+  const {repo,env,file,fixture,install} = setup(t);
+  fixture();
+  const valid = "export default value => Boolean(value);";
+  file("app.mjs", valid);
+  assert.equal(install().status,0);
+  const child = spawn(process.execPath, ["tokensand-check.mjs","--watch-workflow"], {cwd:repo,env,stdio:["ignore","pipe","pipe"]});
+  let log = "";
+  child.stdout.on("data", chunk => { log += chunk; });
+  child.stderr.on("data", chunk => { log += chunk; });
+  async function verdict(state) {
+    const end = Date.now() + 4500;
+    while (!log.includes(state + " running tokensand-check.mjs")) {
+      assert.ok(Date.now() < end && child.exitCode === null, log);
+      await new Promise(resolve => setTimeout(resolve,25));
+    }
+    const output = log;
+    log = "";
+    return output;
+  }
+  try {
+    await verdict("Completed");
+    file(".env.local","unused=true");
+    file("unrelated.mjs","export default false;");
+    await new Promise(resolve => setTimeout(resolve,320));
+    assert.doesNotMatch(log,/running tokensand-check/);
+    for (const atomic of [false,true]) {
+      const save = source => {
+        if (!atomic) return file("app.mjs",source);
+        file("next.mjs",source);
+        renameSync(join(repo,"next.mjs"),join(repo,"app.mjs"));
+      };
+      save("export default (;"); assert.match(await verdict("Failed"),/SyntaxError/);
+      save(valid); assert.match(await verdict("Completed"),/route-unknown/);
+    }
+    file("observe.workflow.mjs", "import './';");
+    assert.match(await verdict("Failed"),/unsupported|directory import/i);
+    file("observe.workflow.mjs", adapter);
+    assert.match(await verdict("Completed"),/route-unknown/);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      const close = new Promise(resolve => child.once("close",resolve));
+      child.kill();
+      await close;
+    }
+  }
+});
+
+test("upgrades published 0.1.14 watch setup and preserves custom commands and runner edits", t => {
+  const oldName = "tokensand-workflow-check-0.1.14.tgz";
+  const oldArchive = [new URL("../packages/" + oldName, import.meta.url),new URL("./distribution/" + oldName, import.meta.url)]
+    .map(fileURLToPath).find(existsSync);
+  for (const customization of ["none","runner","watch"]) {
+    const {root,repo,run,install,file,text,fixture} = setup(t);
+    const previous = join(root,"previous");
+    mkdirSync(previous);
+    execFileSync("tar",["-xzf",oldArchive,"-C",previous]);
+    fixture();
+    file("package.json",JSON.stringify({scripts:{test:"node native.cjs",pretest:"node lint.cjs"}}));
+    assert.equal(run(process.execPath,[join(previous,"package/cli.mjs"),"--install-test"]).status,1);
+    if (customization === "runner") file("tokensand-check.mjs",text("tokensand-check.mjs")+"\n// Team customization.\n");
+    if (customization === "watch") {
+      const manifest = JSON.parse(text("package.json"));
+      manifest.scripts["test:tokensand:watch"] = "node custom-watch.mjs";
+      file("package.json",JSON.stringify(manifest));
+    }
+    const before = text("package.json"), oldRunner = text("tokensand-check.mjs");
+    const after = install();
+    if (customization !== "none") {
+      assert.equal(after.status,2,after.output);
+      assert.equal(text("package.json"),before); assert.equal(text("tokensand-check.mjs"),oldRunner);
+      continue;
+    }
+    assert.equal(after.status,1,after.output); assert.match(after.output,/route-unknown/);
+    const scripts = JSON.parse(text("package.json")).scripts;
+    assert.deepEqual(scripts,{...JSON.parse(before).scripts,"test:tokensand:watch":"node tokensand-check.mjs --watch-workflow"});
+    const upgraded = text("tokensand-check.mjs");
+    assert.notEqual(upgraded,oldRunner);
+    assert.equal(install().status,1);
+    assert.equal(text("tokensand-check.mjs"),upgraded);
   }
 });
 
