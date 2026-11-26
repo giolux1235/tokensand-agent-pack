@@ -35,20 +35,62 @@ const workflow = {
 export default workflow;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  const { values: { "offline-workflow": adapter, case: caseId, "inspect-values": inspectValues, "require-hosted-labels": requireHostedLabels } } = parseArgs({
-    options: { "offline-workflow": { type: "string" }, case: { type: "string" }, "inspect-values": { type: "boolean" }, "require-hosted-labels": { type: "boolean" } },
+  const { values: { "offline-workflow": adapter, case: caseId, "inspect-values": inspectValues, "inspect-tools": inspectTools, "require-hosted-labels": requireHostedLabels } } = parseArgs({
+    options: { "offline-workflow": { type: "string" }, case: { type: "string" }, "inspect-values": { type: "boolean" }, "inspect-tools": { type: "boolean" }, "require-hosted-labels": { type: "boolean" } },
   });
   assert.ok(adapter !== "" && caseId !== "", "Supply a workflow path or case ID after its option.");
   assert.ok(!inspectValues || caseId, "--inspect-values requires --case CASE_ID.");
+  if (inspectTools && !caseId) {
+    console.error("--inspect-tools requires --case CASE_ID.");
+    process.exit(2);
+  }
   // Only load a trusted local adapter explicitly selected by the developer.
   const selected = adapter ? (await import(pathToFileURL(adapter).href)).default : workflow;
   assert.ok(selected?.maxCallsPerRun?.candidate === 0, "Set the offline candidate provider budget to zero.");
   assert.ok(Array.isArray(selected.cases) && selected.cases.length, "Provide at least one case.");
   assert.ok(Array.isArray(selected.checks) && selected.checks.length, "Provide at least one named check.");
+  const { isAbsolute, relative, resolve, sep } = await import("node:path");
+  // A cached npx runner might have no bin in the app. Use the very file that
+  // ran, and resolve the selected adapter against the caller's current directory.
+  function commandPath(path) {
+    const absolute = resolve(path);
+    const local = relative(process.cwd(), absolute);
+    return local && local !== ".." && !local.startsWith(".." + sep) && !isAbsolute(local) ? "." + sep + local : absolute;
+  }
+  function shellWord(value) {
+    if (typeof value !== "string" || value.length > 2048 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) return null;
+    if (/^[A-Za-z0-9_./:@=,+-]+$/.test(value)) return value;
+    if (process.platform === "win32") {
+      // Avoid cmd/PowerShell expansion and embedded quotes. A Windows path may contain spaces.
+      return /^[A-Za-z0-9_./:@=,+ \\-]+$/.test(value) && !value.endsWith("\\") ? '"' + value + '"' : null;
+    }
+    return "'" + value.replaceAll("'", "'\\''") + "'";
+  }
+  let replayShown = false;
+  function showCaseReplay(id) {
+    if (caseId || replayShown || typeof id !== "string" || !id) return;
+    replayShown = true;
+    const script = process.argv[1];
+    const args = ["node", commandPath(script)];
+    if (adapter) args.push("--offline-workflow", commandPath(adapter));
+    args.push("--case=" + id, "--inspect-tools");
+    const words = args.map(shellWord);
+    if (words.includes(null)) {
+      console.log("Replay this case with its exact ID from the workflow. Its ID or file path cannot be safely printed as a shell command.");
+      return;
+    }
+    console.log("Replay this case: " + words.join(" "));
+  }
   const items = caseId ? selected.cases.filter(item => item.id === caseId) : selected.cases;
   const trials = caseId ? 3 : 1;
   if (caseId) {
-    assert.equal(items.length, 1, `Expected one workflow case with the exact ID ${JSON.stringify(caseId)}. Found ${items.length}.`);
+    if (items.length !== 1) {
+      const choices = selected.cases.map(item => item.id)
+        .filter(id => typeof id === "string" && /^[A-Za-z0-9_.:/ -]{1,100}$/.test(id)).slice(0, 8);
+      const reason = items.length ? "The requested case ID is duplicated. Give each case a unique ID." : "Unknown case ID. Use an exact ID from the selected workflow.";
+      console.error(reason + (choices.length ? " Available IDs include " + choices.map(id => JSON.stringify(id)).join(", ") + "." : ""));
+      process.exit(2);
+    }
     console.log(`Checking only ${JSON.stringify(caseId)} for ${trials} trials. Run the full suite before sharing a result.`);
   }
   let valuesFile;
@@ -72,6 +114,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
       invalidHostedLabel = true;
       console.error("Hosted label warning: an executed step or tool label would be rejected. Use a fixed, non-sensitive lowercase name starting with a letter. Tools allow digits, hyphens and underscores (40 characters total). Steps allow digits and underscores (64 total). For example, ctx.tool('inventory-get', callback). Rerun with --require-hosted-labels.");
     }
+    return valid;
   }
   let interrupted = false;
   test.after(() => {
@@ -95,10 +138,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   function registerCase(item, repetition) {
     const name = caseId ? `${item.id} (trial ${repetition + 1}/${trials})` : item.id;
     test(name, { timeout: selected.timeoutMs }, async (t) => {
-      // Execute the adapter's local callbacks without recording or sending spans.
+      const timings = inspectTools ? focusedToolTimings(repetition + 1) : null;
       const executeLocal = async (kind, label, callback) => {
         t.signal.throwIfAborted();
-        checkLabel(kind, label);
+        const validLabel = checkLabel(kind, label);
+        if (timings && kind === "tool") return timings.run(validLabel ? label : "[unnamed]", callback);
         return callback();
       };
       let attemptedFetch = false;
@@ -111,7 +155,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
           throw new Error("Provider transport is disabled for this offline check.");
         },
       };
-      const onAbort = () => { interrupted = true; };
+      const onAbort = () => {
+        interrupted = true;
+        showCaseReplay(item.id);
+        timings?.show("case interrupted");
+      };
       t.signal.addEventListener("abort", onAbort, { once: true });
       const started = performance.now();
       try {
@@ -155,7 +203,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
           throw error;
         }
         assert.equal(failed.length, 0, failed.join(", "));
+      } catch (error) {
+        showCaseReplay(item.id);
+        throw error;
       } finally {
+        timings?.show("case ended");
         t.signal.removeEventListener("abort", onAbort);
       }
     });
@@ -163,4 +215,50 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   for (const item of items) {
     for (let repetition = 0; repetition < trials; repetition++) registerCase(item, repetition);
   }
+}
+
+// Only used on an explicitly inspected local replay. Keep active calls and the
+// five slowest completed calls. A case timeout can fire before a tool settles.
+function focusedToolTimings(trial) {
+  const active = new Set();
+  const completed = [];
+  let total = 0;
+  let shown = false;
+  let firstRejection;
+  return {
+    async run(label, callback) {
+      const call = { index: ++total, label, started: performance.now() };
+      active.add(call);
+      let outcome = "rejected";
+      try {
+        const result = await callback();
+        outcome = "returned";
+        return result;
+      } finally {
+        active.delete(call);
+        const row = { ...call, outcome, ms: performance.now() - call.started };
+        if (outcome === "rejected") firstRejection ??= row;
+        completed.push(row);
+        completed.sort((a, b) => b.ms - a.ms || a.index - b.index);
+        if (completed.length > 5) completed.pop();
+      }
+    },
+    show(end) {
+      if (shown) return;
+      shown = true;
+      const now = performance.now();
+      const rows = [];
+      for (const call of active) {
+        rows.push({ ...call, outcome: "still running", ms: now - call.started });
+        if (rows.length === 5) break;
+      }
+      rows.push(...completed);
+      if (firstRejection && !completed.includes(firstRejection)) rows.push(firstRejection);
+      rows.sort((a, b) => a.index - b.index);
+      console.log(`Local tool calls (trial ${trial}, ${end}): ${rows.length} of ${total}`);
+      for (const row of rows) {
+        console.log(`  #${row.index} ${row.label} — ${row.outcome}, ${Math.round(row.ms)} ms`);
+      }
+    },
+  };
 }

@@ -7,10 +7,12 @@ Check an AI workflow change in your repository and see which cases failed.
 In a trusted npm project with an offline `observe.workflow.mjs`, run this once from the repository root:
 
 ```sh
-npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/82d4a465aa88ebf204dda8df9bebc7b7fd6b1d3c/packages/tokensand-workflow-check-0.1.12.tgz --install-test --github
+npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/2f9ddd41ec897c2668179ffd2c703446e26f8ecd/packages/tokensand-workflow-check-0.1.13.tgz --install-test --github
 ```
 
 Commit the generated changes. Teammates get the same checker on checkout. `npm test` runs it alongside the project’s tests. `npm run test:tokensand:watch` checks again when you save an imported file. Stop watching with Ctrl+C.
+
+When a case fails, copy the replay command printed by the checker. It runs that case three times and shows which instrumented tools returned, rejected, or were still running at the deadline. The diagnostic prints tool names and durations. Run the full suite after the repair.
 
 GitHub runs self-contained cases on pull requests and default-branch pushes. The job has read-only repository access, with networking disabled during evaluation. Its summary shows case counts and the tested revision. Omit `--github` for a local-only install or a service inside a monorepo. To disconnect, revert the setup changes.
 
