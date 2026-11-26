@@ -45,10 +45,10 @@ Local checks run without an account, provider key or MCP connection. If you have
 
 ### Review a release with a teammate
 
-From a clean candidate checkout with your pinned private Node SDK 0.7.7, choose the earlier release tag and its saved run. Use a committed workflow with unchanged checks and declare your app implementation in `sourceFiles`. Run this locally.
+Use the same pinned private Node SDK for both runs. The reviewer recognizes 0.7.7 and 0.7.8. From a clean candidate checkout, choose the earlier release tag and its saved run. Declare the app code in `sourceFiles`. If the scorer changed, the reviewer flags the saved result for review.
 
 ```sh
-npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/da486954ffb90e63a708cc035e8702e2cedf6839/packages/tokensand-workflow-check-0.1.15.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
+npx --yes https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/bdd369be19bb122676cc250a4c38bee9cbbb49f3/packages/tokensand-workflow-check-0.1.16.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
 ```
 
 Open `review.html` to see each case, its scores and both Git revisions. Share the note when ready. A teammate saves it in a trusted checkout of the candidate and runs the command shown for a case. For repeated offline replay, install the pinned archive in your Node toolchain once and use the shorter `tokensand-check` command in the note. The `npx` release URL can need a network connection even after its first run. The public checker runs three fresh trials per revision with the original scorer. It can reproduce self-contained cases without your private SDK, journals or account. A clean replay with fewer trials than the original is inconclusive. A regression exits 100, incomplete evidence exits 2 and passing checks exit 0.
