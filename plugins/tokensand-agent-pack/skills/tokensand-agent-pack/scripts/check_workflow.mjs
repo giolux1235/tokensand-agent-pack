@@ -81,6 +81,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     } catch (error) {
       const code = error && typeof error === "object" && !types.isProxy(error)
         ? Object.getOwnPropertyDescriptor(error, "code")?.value : undefined;
+      if (code === "ENOENT" && typeof reportWatchPaths === "function") {
+        // Top-level reads may fail before the module exports its declarations.
+        reportWatchPaths(process.cwd(), [Object.getOwnPropertyDescriptor(error, "path")?.value]);
+      }
       if (["ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND", "ERR_PACKAGE_PATH_NOT_EXPORTED",
         "ERR_PACKAGE_IMPORT_NOT_DEFINED", "ERR_UNSUPPORTED_DIR_IMPORT"].includes(code)) {
         setupError("A workflow import could not be resolved. Restore the service dependencies or correct its import paths, then rerun.");
@@ -89,6 +93,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     }
   }
   if (!selected || typeof selected !== "object") setupError("Provide a workflow object as the module's default export.");
+  if (adapter && typeof reportWatchPaths === "function") {
+    const { dirname } = await import("node:path");
+    reportWatchPaths(dirname(adapter), selected.sourceFiles);
+    reportWatchPaths(dirname(adapter), selected.evaluatorSourceFiles);
+  }
   if (selected.maxCallsPerRun?.candidate !== 0) setupError("Set the offline candidate provider budget to zero.");
   if (!Array.isArray(selected.cases) || !selected.cases.length) setupError("Provide at least one case.");
   if (!Array.isArray(selected.checks) || !selected.checks.length) setupError("Provide at least one named check.");
