@@ -15,7 +15,7 @@ class PythonRelease(unittest.TestCase):
     def test_installed_and_standalone_runners_match_the_same_baseline(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.11-py3-none-any.whl") as wheel:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.12-py3-none-any.whl") as wheel:
                 self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
                 wheel.extractall(root / "package")
             adapter = ROOT / "examples/incremental-sync.py"
@@ -30,6 +30,34 @@ class PythonRelease(unittest.TestCase):
                         self.assertIn("New failures: 0", run.stderr)
                         expected = "Passed both" if repaired == "1" else "Existing failure"
                         self.assertIn(f'{expected}: "resume-tied-page" / "complete"', run.stderr)
+
+    def test_independent_timeout_keeps_the_refund_routing_failure_visible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = Path(directory) / "workflow.py"
+            adapter.write_text("""
+def evaluate(item, output, variant):
+    def lookup_policy():
+        if variant == "candidate":
+            raise TimeoutError("private evaluator endpoint")
+        return True
+    return {"policy": lookup_policy, "route": lambda: output == "billing"}
+
+workflow = {
+    "cases": [{"id": "refund", "input": "refund"}],
+    "checks": [{"id": "policy"}, {"id": "route"}],
+    "baseline": lambda item: "billing",
+    "candidate": lambda item: "general",
+    "evaluate": evaluate,
+}
+""")
+            run = subprocess.run(
+                [sys.executable, str(SCRIPT), "--offline-workflow", str(adapter), "--compare-baseline"],
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(run.returncode, 1, run.stderr)
+            self.assertIn('New failure: "refund" / "route"', run.stderr)
+            self.assertIn('Unscored: "refund" / "policy"', run.stderr)
+            self.assertNotIn("private evaluator endpoint", run.stderr)
 
     def test_declared_trials_expose_intermittent_failure(self):
         import runpy
@@ -70,7 +98,7 @@ class PythonRelease(unittest.TestCase):
             self.assertEqual(source.count(marker), 1)
             edited.write_text(source.replace(marker, adapter + marker))
             original = edited.read_bytes()
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.11-py3-none-any.whl") as current:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.12-py3-none-any.whl") as current:
                 current.extractall(project / "wheel")
             for guide, command in documented:
                 with self.subTest(guide=guide.name):
@@ -83,7 +111,7 @@ class PythonRelease(unittest.TestCase):
                     self.assertEqual(edited.read_bytes(), original)
 
     def test_shipped_runner(self):
-        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.11-py3-none-any.whl") as wheel:
+        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.12-py3-none-any.whl") as wheel:
             self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
         for repair, outage, code, message in [
             ("0", "0", 1, "Failed checks: Return every remaining record"),
