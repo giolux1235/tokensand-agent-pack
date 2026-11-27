@@ -80,6 +80,13 @@ def build(esbuild):
     overwrite("install-test.mjs", installer)
     core = (SCRIPTS / "check_workflow.mjs").read_text()
     helper = (SCRIPTS / HELPER).read_text()
+    # Recipient replay verifies this exact executable before running the original
+    # scorer. Keep that guard in step with the checker shipped in this archive.
+    old_core_hash = hashlib.sha256(files["agent-check.mjs"][0]).hexdigest()
+    core_hash = hashlib.sha256(core.encode()).hexdigest()
+    verifier = files["recheck-release-v1.mjs"][0].decode()
+    overwrite("recheck-release-v1.mjs", replace_once(verifier,
+        f"const checkerHash = '{old_core_hash}';", f"const checkerHash = '{core_hash}';"))
     overwrite("agent-check.mjs", core)
     files[HELPER] = (helper.encode(), 0o644)
     bundle = standalone(core, helper, esbuild).encode()

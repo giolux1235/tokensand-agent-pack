@@ -122,6 +122,45 @@ test('packaged checker and preload exactly match the Agent Pack; unaffected rele
   assert.equal(sha(join(next,'agent-check.mjs')),sha(join(scripts,'check_workflow.mjs')));
   assert.equal(sha(join(next,'trace_ai_sdk_7.mjs')),sha(join(scripts,'trace_ai_sdk_7.mjs')));
   const manifest=JSON.parse(readFileSync(join(old,'package.json')));
-  for(const name of manifest.files.filter(x=>!['cli.mjs','install-test.mjs','agent-check.mjs'].includes(x)))
+  const verifier='recheck-release-v1.mjs';
+  assert.equal(readFileSync(join(next,verifier),'utf8'),readFileSync(join(old,verifier),'utf8')
+    .replace(sha(join(old,'agent-check.mjs')),sha(join(next,'agent-check.mjs'))));
+  for(const name of manifest.files.filter(x=>!['cli.mjs','install-test.mjs','agent-check.mjs',verifier].includes(x)))
     assert.equal(sha(join(old,name)),sha(join(next,name)),name);
+});
+
+test('recipients replay the frozen checks and reject a modified packaged checker',t=>{
+  const {dir,unpack}=fixture(t);
+  const dist=unpack(latest);
+  const repo=join(dir,'source');
+  const note=join(dir,'release.json');
+  execFileSync('git',['init','-q',repo]);
+  const git=(...args)=>execFileSync('git',args,{cwd:repo,encoding:'utf8'}).trim();
+  function revision(working) {
+    writeFileSync(join(repo,'observe.workflow.mjs'),`export default {
+      id:'order-support',timeoutMs:3000,maxCallsPerRun:{baseline:0,candidate:0},cases:[{id:'amount',input:8}],checks:[{id:'right'}],
+      candidate:n=>n+${working?0:10},evaluate:({input,output})=>({right:input===output})
+    };`);
+    git('add','observe.workflow.mjs');
+    git('-c','user.name=Giovanni Amenta','-c','user.email=giovanni@creatorscorner.co',
+      '-c','commit.gpgsign=false','commit','-qm',working?'Record original amount':'Change converted amount');
+    return git('rev-parse','HEAD');
+  }
+  const referenceRevision=revision(true), candidateRevision=revision(false);
+  writeFileSync(note,JSON.stringify({kind:'tokensand-release-note',schemaVersion:1,selection:'all-recorded-cases',
+    referenceRevision,candidateRevision,cases:[{id:'amount',verdict:'regressed',
+      reference:{passed:3,total:3},candidate:{passed:0,total:3}}]}));
+  function replay(selection,expected) {
+    const result=spawnSync(process.execPath,[join(dist,'cli.mjs'),'--recheck-release',note,...selection,'--run'],
+      {cwd:repo,encoding:'utf8',timeout:30000,env:{PATH:process.env.PATH,HOME:dir,TMPDIR:dir}});
+    assert.ifError(result.error);
+    assert.equal(result.status,expected,result.stdout+result.stderr);
+    return JSON.parse(result.stdout);
+  }
+  assert.equal(replay(['--all-cases'],100).verdict,'regressed');
+  assert.equal(replay(['--case','amount'],100).verdict,'regressed');
+  appendFileSync(join(dist,'agent-check.mjs'),'\n// changed by a local install\n');
+  const held=replay(['--case','amount'],2);
+  assert.equal(held.verdict,'unknown');
+  assert.match(held.reason,/matching public workflow checker/);
 });
