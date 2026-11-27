@@ -26,7 +26,7 @@ When asked to connect a project once, reuse its real offline `observe.workflow.m
 The skill bundles two local runners. Resolve `SKILL_DIR` to the directory containing this SKILL.md. From the service directory, run the command matching its trusted adapter:
 
 - Node default export: `node SKILL_DIR/scripts/check_workflow.mjs --offline-workflow ./observe.workflow.mjs`.
-- Python workflow dictionary: `python3 SKILL_DIR/scripts/check_workflow.py --offline-workflow ./my_workflow.py`.
+- Python workflow dictionary: `python3 SKILL_DIR/scripts/check_workflow.py --offline-workflow ./my_workflow.py`. If the adapter returns an unfinished async operation, await the agent call or collect its stream inside the adapter and rerun the original cases.
 
 Run the service’s own interpreter with one trusted adapter. A full check runs each case for the workflow’s declared `repetitions` (1–10), or once if omitted. To run selected cases, pass each exact ID as one argument, `--case=ID`. Quote that argument in a shell when the ID contains spaces or punctuation. Each runs at least three times. For private values or Node tool timings, select exactly one case and add `--inspect-values` or `--inspect-tools`. A failed or unscored local check exits 1 and an invalid selection or repetition count exits 2. Rerun the full suite after the repair. An existing Node repo test can run with `node test/tokensand-workflow.test.mjs`. Local checks need no first Git commit, account, SDK or MCP connection.
 
