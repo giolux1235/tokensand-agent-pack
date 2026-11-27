@@ -1,10 +1,10 @@
 // Offline starter. Replace planCalls with your own local function returning call IDs.
 import assert from "node:assert/strict";
-import { appendFileSync, closeSync, mkdtempSync, openSync, realpathSync } from "node:fs";
+import { appendFileSync, closeSync, mkdtempSync, openSync, realpathSync, statSync as workflowFileStat } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { inspect, isDeepStrictEqual, parseArgs } from "node:util";
+import { inspect, isDeepStrictEqual, parseArgs, types } from "node:util";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 
@@ -58,11 +58,40 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   if ((inspectTools || inspectValues) && caseIds.length !== 1) {
     invalidSelection((inspectTools ? "--inspect-tools" : "--inspect-values") + " requires --case CASE_ID. Select exactly one case to inspect.");
   }
-  // Only load a trusted local adapter explicitly selected by the developer.
-  const selected = adapter ? (await import(pathToFileURL(adapter).href)).default : workflow;
-  assert.ok(selected?.maxCallsPerRun?.candidate === 0, "Set the offline candidate provider budget to zero.");
-  assert.ok(Array.isArray(selected.cases) && selected.cases.length, "Provide at least one case.");
-  assert.ok(Array.isArray(selected.checks) && selected.checks.length, "Provide at least one named check.");
+  function setupError(message) {
+    invalidSelection("No cases ran. " + message);
+  }
+  // Import only the trusted workflow explicitly selected by the developer.
+  let selected = workflow;
+  if (adapter) {
+    let file;
+    try {
+      file = workflowFileStat(adapter, { throwIfNoEntry: false });
+    } catch {
+      setupError("Cannot read the workflow file. Check its path and read permissions, then rerun.");
+    }
+    if (!file) {
+      setupError("Workflow file not found. From your service directory, pass the file path to --offline-workflow.\n"
+        + "For a new workflow, download and adapt this example: https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.25/observe.workflow.mjs\n"
+        + "Codex or Claude Code: Create observe.workflow.mjs around my changed function with expected results and a zero provider budget. Run it locally.");
+    }
+    if (!file.isFile()) setupError("Select a workflow module file with --offline-workflow.");
+    try {
+      selected = (await import(pathToFileURL(adapter).href)).default;
+    } catch (error) {
+      const code = error && typeof error === "object" && !types.isProxy(error)
+        ? Object.getOwnPropertyDescriptor(error, "code")?.value : undefined;
+      if (["ERR_MODULE_NOT_FOUND", "MODULE_NOT_FOUND", "ERR_PACKAGE_PATH_NOT_EXPORTED",
+        "ERR_PACKAGE_IMPORT_NOT_DEFINED", "ERR_UNSUPPORTED_DIR_IMPORT"].includes(code)) {
+        setupError("A workflow import could not be resolved. Restore the service dependencies or correct its import paths, then rerun.");
+      }
+      setupError("The workflow could not initialize. Check its module syntax and top-level setup, then rerun.");
+    }
+  }
+  if (!selected || typeof selected !== "object") setupError("Provide a workflow object as the module's default export.");
+  if (selected.maxCallsPerRun?.candidate !== 0) setupError("Set the offline candidate provider budget to zero.");
+  if (!Array.isArray(selected.cases) || !selected.cases.length) setupError("Provide at least one case.");
+  if (!Array.isArray(selected.checks) || !selected.checks.length) setupError("Provide at least one named check.");
   const { isAbsolute, relative, resolve, sep } = await import("node:path");
   // A cached npx runner might have no bin in the app. Use the very file that
   // ran, and resolve the selected adapter against the caller's current directory.

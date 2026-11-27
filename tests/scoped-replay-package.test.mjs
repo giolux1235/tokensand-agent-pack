@@ -9,7 +9,7 @@ import test from 'node:test';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const pkg = version => join(root, 'packages', `tokensand-workflow-check-${version}.tgz`);
-const latest = '0.1.25';
+const latest = '0.1.26';
 const sha = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 function fixture(t) {
@@ -65,6 +65,27 @@ function inspected(result) {
   assert.doesNotMatch(result.text,/moduleInit —|scorer —|PrivateInvocationID|modelResult":18/);
 }
 
+test('missing setup gives the same actionable next step in npm and the standalone download', t=>{
+  const {dir,run,unpack}=fixture(t);
+  const dist=unpack(latest);
+  rmSync(join(dir,'observe.workflow.mjs'));
+  const cli=join(dist,'cli.mjs'), standalone=join(dist,'standalone-check.mjs');
+  const explicit=['--offline-workflow','./observe.workflow.mjs','--case=amount'];
+  const results=[
+    run('npm',['exec','--offline','--yes','--package',pkg(latest),'--','tokensand-check',...explicit]),
+    run(process.execPath,[cli,'--case=amount']),
+    run(process.execPath,[standalone,...explicit]),
+  ];
+  for (const result of results) {
+    assert.equal(result.status,2,result.text);
+    assert.match(result.text,/create observe\.workflow\.mjs/i);
+    assert.match(result.text,/zero provider budget/);
+    assert.doesNotMatch(result.text,/ERR_MODULE_NOT_FOUND|node:internal|\d+ passed/);
+  }
+  assert.equal(existsSync(join(dir,'tokensand-first.test.mjs')),false);
+  assert.equal(existsSync(join(dir,'observe.workflow.mjs')),false);
+});
+
 test('npm exec, copied starter and direct release asset use the scoped inspector only on request', t=>{
   const {dir,run,unpack}=fixture(t);
   const dist=unpack(latest);
@@ -85,14 +106,18 @@ test('npm exec, copied starter and direct release asset use the scoped inspector
   assert.equal(readFileSync(join(dir,'registered.txt'),'utf8').trim().split('\n').length,3);
 });
 
-for (const version of ['0.1.19','0.1.24']) {
+for (const [version, installedSha] of [
+  ['0.1.19', '35d32d550d4b7d226b34b1bc3710f63624bf5bcd49bb65cd6a3a4f6cc08e4ac6'],
+  ['0.1.24', '35d32d550d4b7d226b34b1bc3710f63624bf5bcd49bb65cd6a3a4f6cc08e4ac6'],
+  ['0.1.25', 'e80168f21af0b37b274348f27fb6e9a0e50a7287560284f7db813ae2b59151f6'],
+]) {
   test('upgrades the unmodified '+version+' runner and protects local edits',t=>{
     const {dir,run,unpack}=fixture(t);
     const old=unpack(version), next=unpack(latest);
     const install=(where)=>run(process.execPath,[join(where,'cli.mjs'),'--install-test']);
     assert.equal(install(old).status,1);
     const generated=join(dir,'tokensand-check.mjs');
-    assert.equal(sha(generated),'35d32d550d4b7d226b34b1bc3710f63624bf5bcd49bb65cd6a3a4f6cc08e4ac6');
+    assert.equal(sha(generated),installedSha);
     const original=readFileSync(generated);
     const manifest=readFileSync(join(dir,'package.json'));
     appendFileSync(generated,'\n// local customization\n');
@@ -117,7 +142,7 @@ for (const version of ['0.1.19','0.1.24']) {
 
 test('packaged checker and preload exactly match the Agent Pack; unaffected release tools keep their bytes',t=>{
   const {unpack}=fixture(t);
-  const old=unpack('0.1.24'), next=unpack(latest);
+  const old=unpack('0.1.25'), next=unpack(latest);
   const scripts=join(root,'plugins/tokensand-agent-pack/skills/tokensand-agent-pack/scripts');
   assert.equal(sha(join(next,'agent-check.mjs')),sha(join(scripts,'check_workflow.mjs')));
   assert.equal(sha(join(next,'trace_ai_sdk_7.mjs')),sha(join(scripts,'trace_ai_sdk_7.mjs')));
@@ -125,7 +150,8 @@ test('packaged checker and preload exactly match the Agent Pack; unaffected rele
   const verifier='recheck-release-v1.mjs';
   assert.equal(readFileSync(join(next,verifier),'utf8'),readFileSync(join(old,verifier),'utf8')
     .replace(sha(join(old,'agent-check.mjs')),sha(join(next,'agent-check.mjs'))));
-  for(const name of manifest.files.filter(x=>!['cli.mjs','install-test.mjs','agent-check.mjs',verifier].includes(x)))
+  assert.deepEqual(JSON.parse(readFileSync(join(next,'package.json'))).files,manifest.files);
+  for(const name of manifest.files.filter(x=>!['cli.mjs','install-test.mjs','agent-check.mjs','standalone-check.mjs',verifier].includes(x)))
     assert.equal(sha(join(old,name)),sha(join(next,name)),name);
 });
 
