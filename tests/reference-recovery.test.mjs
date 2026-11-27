@@ -39,7 +39,9 @@ test('release review sends only known reference failures to the packaged repair 
   const broken = release('-pending','blocked.json');
   assert.equal(broken.status, 2, broken.stderr);
   assert.match(broken.stdout, /The selected reference case was already failing\./);
-  assert.match(broken.stdout, /^--review-repair REFERENCE_RUN CANDIDATE_RUN --case -pending$/m);
+  assert.match(broken.stdout, /^--review-repair REFERENCE_RUN CANDIDATE_RUN --case -pending --original-checkout EARLIER_SERVICE$/m);
+  assert.match(broken.stdout, /original checks/);
+  assert.match(broken.stdout, /only have the saved runs, omit --original-checkout EARLIER_SERVICE/);
   assert.doesNotMatch(broken.stdout, /Open the clean candidate checkout/);
   assert.equal(existsSync(join(dir,'blocked.json')), false);
   const other = release('other','unknown.json');
@@ -54,4 +56,14 @@ test('release review sends only known reference failures to the packaged repair 
   const repair = command('--review-repair');
   assert.equal(repair.status, 1);
   assert.match(repair.stderr, /Usage: node review-repair-v1\.mjs/);
+  assert.doesNotMatch(repair.stdout, /append --original-checkout/);
+  writeFileSync(join(dir, 'review-repair-v1.mjs'), "process.exitCode = process.argv[2] === 'failed' ? 100 : 0;");
+  for (const [before, exit] of [['before',0], ['failed',100]]) {
+    const recorded = command('--review-repair', before, 'after', '--case', 'pending');
+    assert.equal(recorded.status, exit);
+    assert.match(recorded.stdout, /append --original-checkout EARLIER_SERVICE/);
+    const rescored = command('--review-repair', before, 'after', '--case', 'pending', '--original-checkout', 'earlier');
+    assert.equal(rescored.status, exit);
+    assert.doesNotMatch(rescored.stdout, /append --original-checkout/);
+  }
 });

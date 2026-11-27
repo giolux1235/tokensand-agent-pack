@@ -56,7 +56,7 @@ Use the same pinned private Node SDK for both runs. The reviewer recognizes 0.7.
 npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.24/tokensand-workflow-check-0.1.24.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
 ```
 
-If the selected case already failed in the earlier release, run the same checker with `--review-repair REFERENCE_RUN CANDIDATE_RUN --case CASE_ID`. Add `--original-checkout EARLIER_SERVICE` to score the saved outputs with the earlier checkout’s checks.
+If the selected case already failed in the earlier release, use the earlier checkout to score the saved outputs with its original checks. Run the same checker with `--review-repair REFERENCE_RUN CANDIDATE_RUN --case CASE_ID --original-checkout EARLIER_SERVICE`. If you only have the saved runs, omit `--original-checkout EARLIER_SERVICE` to compare the recorded scores.
 
 Open `review.html` to see the blocking cases, their scores and both Git revisions. Review the case names before sharing the note. Keep your run directories and private inputs and outputs on your machine.
 
