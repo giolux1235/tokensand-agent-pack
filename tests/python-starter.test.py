@@ -12,6 +12,68 @@ SCRIPT = ROOT / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/script
 
 
 class PythonRelease(unittest.TestCase):
+    def test_required_coverage_keeps_the_suite_and_rejects_missing_or_unselected_ids(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / "ran"
+            adapter = root / "workflow.py"
+            adapter.write_text("""
+from pathlib import Path
+def task(item):
+    with open(Path(__file__).with_name('ran'), 'a') as witness:
+        witness.write(item + '\\n')
+    return item
+workflow = dict(cases=[{'id':i,'input':i} for i in ('one', 'two')],
+                checks=[{'id':i} for i in ('keep', 'other')],
+                repetitions=2, baseline=task, candidate=task,
+                evaluate=lambda item, output, variant: {'keep': True, 'other': item == 'one'})
+""")
+            def check(flags):
+                marker.unlink(missing_ok=True)
+                return subprocess.run([sys.executable, "-B", str(SCRIPT), "--offline-workflow", str(adapter), *flags],
+                                      capture_output=True, text=True, timeout=10)
+            for extra, code, text, callback_count in [
+                (["--require-case=one", "--require-check=keep"], 1, 'Existing failure: "two" / "other" · trials 1, 2', 8),
+                (["--case=one", "--require-case=one", "--require-check=keep"], 0, 'Passed both: "one" / "keep" · trials 1, 2, 3', 6),
+                (["--require-check=gone", "--require-case=absent"], 2, 'Missing required cases: "absent"\nMissing required checks: "gone"', 0),
+                (["--case=one", "--require-case=two"], 2, 'Required case "two" is outside --case selection', 0),
+                (["--require-check=keep", "--require-check=sk-example-private"], 2, 'Missing required checks: #2', 0),
+                (["--case=unknown"], 2, 'Missing required cases: "unknown"', 0),
+            ]:
+                with self.subTest(extra=extra):
+                    result = check(["--compare-baseline", *extra])
+                    self.assertEqual(result.returncode, code, result.stderr)
+                    self.assertIn(text, result.stderr)
+                    self.assertNotIn("sk-example-private", result.stderr)
+                    self.assertEqual(len(marker.read_text().splitlines()) if marker.exists() else 0, callback_count)
+            for flags in (["--require-case=one"], ["--compare-baseline", "--require-check="],
+                          ["--compare-baseline", "--require-case=one", "--require-case=one"],
+                          ["--compare-baseline", "--require-check=keep", "--require-check=keep"],
+                          ["--compare-baseline", "--require-check=secret\nvalue"]):
+                result = check(flags)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertFalse(marker.exists())
+                self.assertNotIn("secret\nvalue", result.stderr)
+
+    def test_missing_coverage_preempts_empty_matrices_and_known_false_remains_failed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = root / "workflow.py"
+            run = lambda: subprocess.run([sys.executable, "-B", str(SCRIPT), "--offline-workflow", str(adapter),
+                "--compare-baseline", "--require-case=event", "--require-check=ok"],
+                capture_output=True, text=True, timeout=10)
+            adapter.write_text("workflow=dict(cases=[],checks=[],baseline=lambda x:x,candidate=lambda x:x,evaluate=lambda *_:{})")
+            result = run()
+            self.assertEqual(result.returncode, 2)
+            self.assertIn('Missing required cases: "event"\nMissing required checks: "ok"', result.stderr)
+            adapter.write_text("workflow=dict(cases=[{'id':'event','input':1}], checks=[{'id':'ok'},{'id':'sk-private-name'}],"
+                               "baseline=lambda x:x,candidate=lambda x:x,evaluate=lambda *_:{'ok':False})")
+            result = run()
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('Existing failure: "event" / "ok"', result.stderr)
+            self.assertIn('Unscored: "event" / #2', result.stderr)
+            self.assertNotIn("sk-private-name", result.stderr)
+
     def test_missing_adapter_points_to_an_existing_file_or_the_template_without_running_it(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -76,7 +138,7 @@ def read_only(event, args):
         raise PermissionError("Read-only test checkout")
 sys.addaudithook(read_only)
 """)
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.15-py3-none-any.whl") as wheel:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.16-py3-none-any.whl") as wheel:
                 wheel.extractall(root / "installed")
             for command in ([sys.executable, str(SCRIPT)], [sys.executable, "-m", "tokensand_check"]):
                 with self.subTest(command=command[-1]):
@@ -92,7 +154,7 @@ sys.addaudithook(read_only)
     def test_installed_and_standalone_runners_match_the_same_baseline(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.15-py3-none-any.whl") as wheel:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.16-py3-none-any.whl") as wheel:
                 self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
                 wheel.extractall(root / "package")
             adapter = ROOT / "examples/incremental-sync.py"
@@ -175,7 +237,7 @@ workflow = {
             self.assertEqual(source.count(marker), 1)
             edited.write_text(source.replace(marker, adapter + marker))
             original = edited.read_bytes()
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.15-py3-none-any.whl") as current:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.16-py3-none-any.whl") as current:
                 current.extractall(project / "wheel")
             for guide, command in documented:
                 with self.subTest(guide=guide.name):
@@ -205,7 +267,7 @@ workflow = {
     "evaluate": lambda item, output, variant: {"counter_correct": output == item["expected"]},
 }
 """)
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.15-py3-none-any.whl") as wheel:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.16-py3-none-any.whl") as wheel:
                 wheel.extractall(root / "installed")
             for entry in [[str(SCRIPT)], ["-m", "tokensand_check"]]:
                 for arm, extra, code in [("candidate", [], 0), ("baseline", ["--variant", "baseline"], 1)]:
@@ -234,7 +296,7 @@ workflow = {
                         file.unlink()
 
     def test_shipped_runner(self):
-        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.15-py3-none-any.whl") as wheel:
+        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.16-py3-none-any.whl") as wheel:
             self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
         for repair, outage, code, message in [
             ("0", "0", 1, "Failed checks: Return every remaining record"),

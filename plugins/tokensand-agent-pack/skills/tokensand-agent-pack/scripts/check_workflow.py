@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import json
 import os
+import re
 import reprlib
 import tempfile
 from pathlib import Path
@@ -13,6 +14,7 @@ import runpy
 import subprocess
 import sys
 import unittest
+import unicodedata
 
 
 def plan_calls(calls):
@@ -215,7 +217,17 @@ def load_workflow(path):
     return runpy.run_path(str(path))["workflow"]
 
 
-def variant_scores(variant, workflow_path, *selected):
+def has_control_character(value):
+    return any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in value)
+
+
+def paired_id(value, position):
+    hidden = (len(value) > 120 or has_control_character(value)
+              or re.search(r"(?:^|[^a-z0-9])(?:sk[-_]|tobs_|dai_|tvly-)", value, re.I))
+    return f"#{position + 1}" if hidden else json.dumps(value)
+
+
+def variant_scores(variant, workflow_path, *selected, requirements=None):
     original = load_workflow(workflow_path)
     # Capture the declared test matrix before application callbacks can mutate it.
     definition = dict(original, cases=copy.deepcopy(list(original["cases"])),
@@ -224,10 +236,15 @@ def variant_scores(variant, workflow_path, *selected):
         raise ValueError("The workflow must define a callable evaluator.")
     if not callable(definition.get(variant)):
         raise ValueError(f"The workflow must define a callable {variant}.")
+    missing = {}
     for field in ("cases", "checks"):
         ids = [entry["id"] for entry in definition[field]]
         if not all(isinstance(key, str) and key for key in ids) or len(ids) != len(set(ids)):
             raise ValueError(f"Each entry in {field} needs a unique string id.")
+        if requirements:
+            missing[field] = [value for value in requirements[field] if value not in ids]
+    if any(missing.values()):
+        return {"missing": missing}
     rows = []
     suite = case_suite(definition, selected or None, variant=variant, score_rows=rows)
     result = suite.run(unittest.TestResult())
@@ -236,12 +253,12 @@ def variant_scores(variant, workflow_path, *selected):
     return {"checks": [c["id"] for c in definition["checks"]], "rows": rows}
 
 
-def send_variant_scores(variant, workflow_path, *selected):
+def send_variant_scores(variant, workflow_path, *selected, requirements=None):
     # Keep the control pipe private before importing the trusted app. Direct fd
     # writes and child processes see the same null stdout/stderr as in 0.1.12.
     with os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8") as receipt:
         os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
-        scores = variant_scores(variant, workflow_path, *selected)
+        scores = variant_scores(variant, workflow_path, *selected, requirements=requirements)
         json.dump(scores, receipt, separators=(",", ":"), allow_nan=False)
     return 0
 
@@ -268,7 +285,7 @@ def valid_variant_scores(record):
     return True
 
 
-def read_variant_scores(command, timeout=None):
+def read_variant_scores(command, timeout=None, *, requirements=None):
     # communicate() drains the pipe while the worker runs, including matrices
     # larger than the OS pipe buffer. The CLI keeps the caller's time budget.
     result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -280,20 +297,33 @@ def read_variant_scores(command, timeout=None):
         record = json.loads(result.stdout)
     except (ValueError, RecursionError):
         record = None
+    if requirements and isinstance(record, dict) and isinstance(record.get("missing"), dict):
+        lines = []
+        for field, ids in requirements.items():
+            claim = record["missing"].get(field)
+            if isinstance(claim, list):
+                # Render only IDs the caller required; never echo arbitrary worker data.
+                labels = [paired_id(value, i) for i, value in enumerate(ids) if value in claim]
+                if labels:
+                    lines.append(f"Missing required {field}: " + ", ".join(labels))
+        if lines:
+            raise ValueError("\n".join([*lines, "Restore the missing coverage in the workflow and rerun with the same requirements."]))
     if not valid_variant_scores(record):
         raise ValueError("The worker returned an invalid score receipt. Run the ordinary check for details.")
     return record
 
 
-def compare_baseline(workflow_path, selected):
+def compare_baseline(workflow_path, selected, required_cases=(), required_checks=()):
     # Separate interpreters preserve within-variant state across repetitions without
     # letting one variant warm the other's cache or advance its application state.
     initial_hash = hashlib.sha256(workflow_path.read_bytes()).digest()
     records = []
+    requirements = {"cases": list(dict.fromkeys([*selected, *required_cases])), "checks": list(required_checks)}
+    worker_args = ["--_required-scores", json.dumps(requirements)] if any(requirements.values()) else ["--_variant-scores"]
     for variant in ("baseline", "candidate"):
-        command = [sys.executable, "-B", __file__, "--_variant-scores", variant, str(workflow_path), *selected]
+        command = [sys.executable, "-B", __file__, *worker_args, variant, str(workflow_path), *selected]
         try:
-            records.append(read_variant_scores(command))
+            records.append(read_variant_scores(command, requirements=requirements))
         except OSError:
             print(f"Could not launch or read the {variant} worker. Check local Python subprocess access.", file=sys.stderr)
             return 2
@@ -324,11 +354,13 @@ def compare_baseline(workflow_path, selected):
                 partial_pairs.setdefault(key, {}).setdefault((earlier, current), []).append(trial)
     print("Baseline and candidate on the same cases and checks", file=sys.stderr)
     score_text = {True: "passed", False: "failed", None: "unscored"}
+    case_labels = {name: paired_id(name, i) for i, name in enumerate(dict.fromkeys(row[0] for row in before["rows"]))}
+    check_labels = {name: paired_id(name, i) for i, name in enumerate(before["checks"])}
     for label, pairs in grouped.items():
         if label == "New failure" and not pairs:
             print("New failures: undetermined (unscored checks)" if grouped["Unscored"] else "New failures: 0", file=sys.stderr)
         for (case_id, check_id), trials in pairs.items():
-            print(f"{label}: {json.dumps(case_id)} / {json.dumps(check_id)} · trials "
+            print(f"{label}: {case_labels[case_id]} / {check_labels[check_id]} · trials "
                   + ", ".join(map(str, trials)), file=sys.stderr)
             if label == "Unscored":
                 for (earlier, current), partial_trials in partial_pairs[(case_id, check_id)].items():
@@ -344,9 +376,13 @@ def load_tests(loader, tests, pattern):
 def main(argv):
     if argv[:1] == ["--_variant-scores"]:
         return send_variant_scores(*argv[1:])
+    if argv[:1] == ["--_required-scores"]:
+        return send_variant_scores(*argv[2:], requirements=json.loads(argv[1]))
     parser = argparse.ArgumentParser(description="Run each offline case for its configured repetitions (default: once).")
     parser.add_argument("--offline-workflow", type=Path, action="append", help="Trusted local Python file exporting a workflow dictionary.")
     parser.add_argument("--case", action="append", help="Exact case ID to run at least three times. Repeat --case to select more cases.")
+    parser.add_argument("--require-case", action="append", default=[], help="Require this case in a paired run without narrowing the suite. Repeat for more IDs.")
+    parser.add_argument("--require-check", action="append", default=[], help="Require this check in a paired run without narrowing the suite. Repeat for more IDs.")
     parser.add_argument("--inspect-values", action="store_true", help="Save local expected and actual value previews for one case.")
     parser.add_argument("--variant", choices=("baseline", "candidate"), action="append",
                         help="Choose the arm for a fresh --inspect-values replay of one case (default: candidate).")
@@ -361,6 +397,15 @@ def main(argv):
             parser.error("Choose one --variant baseline or candidate.")
         if not args.inspect_values:
             parser.error("--variant selects one arm for --inspect-values with one --case CASE_ID.")
+    if args.require_case or args.require_check:
+        if not args.compare_baseline:
+            parser.error("Use --require-case and --require-check with --compare-baseline.")
+        for ids in (args.require_case, args.require_check):
+            if len(set(ids)) != len(ids) or any(not value.strip() or has_control_character(value) for value in ids):
+                parser.error("Provide each required case or check ID once, with a nonempty, single-line ID.")
+        for i, value in enumerate(args.require_case):
+            if args.case and value not in args.case:
+                parser.error(f"Required case {paired_id(value, i)} is outside --case selection. Remove --case to run the full suite or include that case.")
     if args.compare_baseline:
         if len(args.offline_workflow or []) != 1:
             parser.error("--compare-baseline requires --offline-workflow PATH to your project adapter.")
@@ -383,7 +428,7 @@ def main(argv):
                       "https://github.com/giolux1235/tokensand-agent-pack/blob/python-check-0.1.14/examples/incremental-sync.py", file=sys.stderr)
             return 2
         if args.compare_baseline:
-            return compare_baseline(path, args.case or [])
+            return compare_baseline(path, args.case or [], args.require_case, args.require_check)
         definition = load_workflow(path)
     else:
         definition = workflow
