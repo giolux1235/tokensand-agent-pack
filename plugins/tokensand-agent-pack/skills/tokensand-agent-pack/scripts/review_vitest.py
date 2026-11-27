@@ -115,9 +115,15 @@ def compare(args, earlier, later):
                 implementation.update(adjacent)
     if implementation & protected or implementation - loaded:
         raise Invalid("implementation files must be reached local modules, separate from tests and controls")
-    changed_impl = {path for path in implementation if old.get(path) != new.get(path)}
+    one_sided = implementation & (old.keys() ^ new.keys())
+    changed_impl = {path for path in implementation - one_sided if old[path] != new[path]}
     if not implementation:
         issues.append("No implementation was identified. Use --implementation FILE for the intended service module.")
+    elif one_sided:
+        for path in sorted(one_sided):
+            checkout = "baseline" if path in old else "candidate"
+            issues.append(f"Implementation reached only in the {checkout}: " + json.dumps(path.as_posix(), ensure_ascii=True) +
+                          ". Verify both test runs exercise the same service module.")
     elif not changed_impl:
         known = ", ".join(json.dumps(path.as_posix(), ensure_ascii=True) for path in sorted(implementation))
         issues.append("Implementation unchanged: " + known + ".")
@@ -137,7 +143,7 @@ def compare(args, earlier, later):
     for path, lhs, rhs, _ in sources:
         if lhs != rhs:
             print("Changed test, control or local import: " + json.dumps(path.as_posix(), ensure_ascii=True))
-    if implementation and not changed_impl and any(old.get(path) != new.get(path) for path in args.files):
+    if implementation and not (changed_impl or one_sided) and any(old.get(path) != new.get(path) for path in args.files):
         print("The selected test changed while its identified implementation stayed identical. Keep the original assertions and fix the implementation.")
     if before.keys() != after.keys():
         print("The named test roster changed.")

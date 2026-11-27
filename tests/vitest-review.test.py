@@ -200,6 +200,24 @@ test('reads the business golden', async () => { await expect(String(units([1, 3]
         self.assertEqual(result.returncode, 100)
         self.assertIn("No implementation was identified. Use --implementation FILE", result.stdout)
 
+    def test_a_service_reached_in_only_one_run_cannot_verify_a_repair(self):
+        service_import = "import {units} from './service.mjs';"
+        for checkout, side in [("after", "baseline"), ("before", "candidate")]:
+            with self.subTest(side=side):
+                for arm in ("before", "after"):
+                    self.set(arm, "units.test.mjs", TEST)
+                    self.set(arm, "service.mjs", AFTER if checkout == "before" else BEFORE)
+                local = BEFORE if checkout == "before" else AFTER
+                self.set(checkout, "units.test.mjs", TEST.replace(service_import, local.removeprefix("export ")))
+                # The service remains on disk in both checkouts. Reaching it in
+                # just one does not establish which bytes the other suite tested.
+                report = self.review(100)
+                self.assertIn("1/2 before, 2/2 after", report)
+                self.assertIn(f'Implementation reached only in the {side}: "service.mjs"', report)
+                self.assertNotIn("Changed implementation:", report)
+                self.assertNotIn("Implementation unchanged:", report)
+                self.assertNotIn("stayed identical", report)
+
     def test_wrong_file_selection_and_already_green(self):
         self.assertIn("INVALID", self.review(1, label="../outside.test.mjs"))
         self.set("before", "service.mjs", AFTER)
