@@ -36,6 +36,15 @@ Run the same install command to update an existing generated setup. Commit the s
 
 When a case fails, copy the replay command printed by the checker. It runs that case at least three times and shows which instrumented tools returned, rejected, or were still running at the deadline. An unscored check needs attention even when another check already failed. Fix the failure, restore the missing score and rerun the full suite.
 
+For a tool-calling service on Vercel AI SDK 7, ask your agent **“Show me what each tool returned on the failing case.”** With the global skill installed, you can also replay it from the service directory:
+
+```sh
+skill="$HOME/.agents/skills/tokensand-agent-pack"
+node --import "$skill/scripts/trace_ai_sdk_7.mjs" "$skill/scripts/check_workflow.mjs" --offline-workflow ./observe.workflow.mjs --case=CASE_ID
+```
+
+Replace `CASE_ID` with the failing case. The private local report records each tool’s name, timing and status. To inspect a known non-sensitive result, prefix the command with `TOKENSAND_TOOL_RESULT_FIELD=count` for a named field or `TOKENSAND_TOOL_RESULT_FIELD=.` for a scalar return. In that report, `result` is the tool’s return and `modelResult` is the selected value observed again in the next SDK model call. Either can be absent. The same preload works with an existing Node test.
+
 GitHub runs self-contained cases on pull requests and default-branch pushes. The job has read-only repository access, with networking disabled during evaluation. Its summary shows case counts and the tested revision. Omit `--github` for a local-only install or a service inside a monorepo. To disconnect, revert the setup changes.
 
 ## Run a shared Tokens& project
