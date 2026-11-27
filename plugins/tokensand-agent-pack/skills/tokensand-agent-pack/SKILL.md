@@ -27,7 +27,7 @@ The skill bundles two local runners. Resolve `SKILL_DIR` to the directory contai
 
 - Node default export: `node SKILL_DIR/scripts/check_workflow.mjs --offline-workflow ./observe.workflow.mjs`.
 - Python workflow dictionary: `python3 SKILL_DIR/scripts/check_workflow.py --offline-workflow ./my_workflow.py`. If the adapter returns an unfinished async operation, await the agent call or collect its stream inside the adapter and rerun the original cases.
-- To answer “What did this change break?”, add `--compare-baseline` to the Python command when the trusted offline adapter has baseline and candidate callbacks and JSON fixtures. Report new failures, recoveries and inherited failures. For an unscored pair, name the missing side and any known failure. Setup or fixture drift exits 2.
+- To answer “What did this change break?”, add `--compare-baseline` to the Python command when the trusted offline adapter has baseline and candidate callbacks and JSON fixtures. This works in read-only sessions. Report new failures, recoveries and inherited failures. For an unscored pair, name the missing side and any known failure. Setup or fixture drift exits 2.
 
 Read repeated Python scores by case and check. Use `--verbose` for individual trial reports. An unscored check needs investigation. Use a separately named prerequisite check to substantiate a missing annotation.
 
