@@ -4,13 +4,15 @@ import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 
-const usage = "node inspect_hosted_trial.mjs RUN_DIRECTORY --result UUID_OR_PRIVATE_RESULT_URL --case CASE_ID --trial 1 [--field FIELD_OR_POINTER] [--plan PLAN_FILE]";
+const usage = "node inspect_hosted_trial.mjs RUN_DIRECTORY --result UUID_OR_PRIVATE_RESULT_URL --case CASE_ID (--trial 1 [--field FIELD_OR_POINTER] | --tool TOOL_NAME [--min-delta-ms 5]) [--plan PLAN_FILE]";
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const isUuid = value => typeof value === "string" && uuid.test(value);
 const caseId = /^[a-z0-9_-]{1,80}$/i;
 const digest = value => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const checkId = /^[a-z][a-z0-9_]{0,79}$/;
 const secretName = /auth|token|cookie|secret|password|passcode|passphrase|otp|onetime|recovery|apikey|privatekey|signingkey|accesskey|sessionid|credential/i;
+const safeToolName = value => typeof value === "string" && /^[a-z][a-z0-9_-]{0,39}$/.test(value) &&
+  !/(?:^|[^a-z0-9])(?:sk[-_]|tobs_|dai_|tvly-)/i.test(value);
 const secretValue = /authorization|credential|password|private.?key|secret|(?:^|[^a-z0-9])(?:sk[-_]|gh[pousr]_|github_pat_|tobs_|dai_|tvly-|eyJ)|\bBearer\s|[A-Za-z0-9_+/=-]{30,}/i;
 const statuses = ["ok", "workflow_error", "check_error", "timeout", "telemetry_failed", "budget_exceeded"];
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -77,9 +79,66 @@ function selectedOutput(output, field, path) {
   return { field, status: "recorded", value };
 }
 
+function validatedTools(row, plan, checks) {
+  requireEvidence(typeof row.startedAt === "string" && Number.isFinite(Date.parse(row.startedAt)) && new Date(row.startedAt).toISOString() === row.startedAt && duration(row.workflowMs) && row.workflowMs <= plan.timeoutMs + 5000 &&
+    Array.isArray(row.eventIds) && row.eventIds.every(isUuid) && new Set(row.eventIds).size === row.eventIds.length && statuses.includes(row.status) && object(row.checks));
+  requireEvidence(Object.keys(row.checks).length === checks.length && checks.every(id => Object.hasOwn(row.checks, id) &&
+    (typeof row.checks[id] === "boolean" || (row.status !== "ok" && row.checks[id] === null))));
+  const spans = row.toolSpans === undefined ? [] : row.toolSpans;
+  requireEvidence(Array.isArray(spans) && spans.length <= 32 && new Set(spans.map(s => s?.id)).size === spans.length);
+  const tools = spans.map(s => {
+    requireEvidence(object(s) && isUuid(s.id) && safeToolName(s.name) && ["ok", "error", "interrupted"].includes(s.status) &&
+      duration(s.startMs) && duration(s.durationMs) && s.startMs + s.durationMs <= row.workflowMs + 1);
+    return { name: s.name, status: s.status, startMs: s.startMs, durationMs: s.durationMs };
+  });
+  return tools;
+}
+
+// Only the saved timing metadata is needed to compare repetitions.
+function toolMeasurement(arm, name) {
+  if (!arm) return { unavailable: "missing trial" };
+  if (arm.status !== "ok") return { unavailable: arm.status };
+  if (!arm.complete) return { unavailable: "incomplete telemetry" };
+  if (arm.tools.length === 32) return { unavailable: "span limit reached" };
+  const calls = arm.tools.filter(s => s.name === name);
+  if (!calls.length) return { unavailable: "tool not recorded" };
+  if (calls.some(s => s.status !== "ok")) return { unavailable: "unfinished or failed tool call" };
+
+  let end = 0, active = 0;
+  for (const span of calls.sort((a, b) => a.startMs - b.startMs)) {
+    const next = span.startMs + span.durationMs;
+    active += Math.max(0, next - Math.max(end, span.startMs));
+    end = Math.max(end, next);
+  }
+  return { activeMs: Number(active.toFixed(6)), calls: calls.length };
+}
+
+function summarizeTool(pairs, name, minDeltaMs) {
+  const trials = pairs.map((pair, n) => {
+    const baseline = toolMeasurement(pair.baseline, name);
+    const candidate = toolMeasurement(pair.candidate, name);
+    const deltaMs = baseline.unavailable || candidate.unavailable ? null
+      : Number((candidate.activeMs - baseline.activeMs).toFixed(6));
+    return { trial: n + 1, baseline, candidate, deltaMs };
+  });
+  const comparable = trials.filter(t => t.deltaMs !== null);
+  return { tool: name, minDeltaMs, plannedTrials: pairs.length, comparableTrials: comparable.length,
+    slowerTrialIds: comparable.filter(t => t.deltaMs > minDeltaMs).map(t => t.trial), trials };
+}
+
 async function inspect(directory, opts) {
   const expectedId = resultId(opts.result);
-  requireEvidence(caseId.test(opts.case) && /^[1-9][0-9]*$/.test(opts.trial), usage);
+  const byTool = opts.tool !== undefined;
+  requireEvidence(caseId.test(opts.case) && (byTool !== (opts.trial !== undefined)), usage);
+  let minDeltaMs;
+  if (byTool) {
+    requireEvidence(safeToolName(opts.tool) && opts.field === undefined, usage);
+    const threshold = opts["min-delta-ms"] ?? "5";
+    requireEvidence(/^(?:0|[1-9][0-9]{0,5})(?:[.][0-9]{1,3})?$/.test(threshold) && Number(threshold) <= 180000, usage);
+    minDeltaMs = Number(threshold);
+  } else {
+    requireEvidence(/^[1-9][0-9]*$/.test(opts.trial) && opts["min-delta-ms"] === undefined, usage);
+  }
   const trial = Number(opts.trial);
   const field = opts.field;
   const selectedPath = fieldPath(field);
@@ -101,19 +160,27 @@ async function inspect(directory, opts) {
   requireEvidence(cases.length > 0 && cases.length <= 10 && cases.every(id => typeof id === "string" && caseId.test(id)) &&
     new Set(cases).size === cases.length && checks.length > 0 && checks.length <= 16 &&
     checks.every(id => typeof id === "string" && checkId.test(id)) && new Set(checks).size === checks.length);
-  requireEvidence(cases.includes(opts.case) && trial <= plan.repetitions, "The requested case or trial is outside the frozen plan.");
+  requireEvidence(cases.includes(opts.case) && (byTool || trial <= plan.repetitions), "The requested case or trial is outside the frozen plan.");
   const plannedCount = cases.length * plan.repetitions * 2;
   requireEvidence(plannedCount <= 60);
   requireEvidence(Array.isArray(result.runs) && result.runs.length <= plannedCount && (result.state !== "complete" || result.runs.length === plannedCount));
   const sessions = new Set(), identities = new Set();
-  const arms = {};
+  const pairs = Array.from({ length: plan.repetitions }, () => ({}));
   for (const [index, row] of result.runs.entries()) {
     requireEvidence(object(row) && cases.includes(row.caseId) && ["baseline", "candidate"].includes(row.variant) &&
       Number.isInteger(row.repetition) && row.repetition >= 0 && row.repetition < plan.repetitions && isUuid(row.sessionId));
     const key = [row.caseId, row.variant, row.repetition].join("/");
     requireEvidence(!sessions.has(row.sessionId.toLowerCase()) && !identities.has(key), "Duplicate session or trial in the saved result.");
     sessions.add(row.sessionId.toLowerCase()); identities.add(key);
-    if (row.caseId !== opts.case || row.repetition !== trial - 1) continue;
+    if (row.caseId !== opts.case || (!byTool && row.repetition !== trial - 1)) continue;
+    const tools = validatedTools(row, plan, checks);
+    const arms = pairs[row.repetition];
+    if (byTool) {
+      const complete = row.telemetryComplete === true && Number.isSafeInteger(row.providerCalls) &&
+        row.providerCalls >= 0 && row.eventIds.length === row.providerCalls;
+      arms[row.variant] = { status: row.status, tools, complete };
+      continue;
+    }
     const filename = "run-" + String(index + 1).padStart(3, "0") + ".json";
     const journal = await readJson(join(directory, filename), filename);
     requireEvidence(object(journal?.run) && journal.kind === undefined, "Expected the original connected run journal.");
@@ -121,21 +188,14 @@ async function inspect(directory, opts) {
     const required = ["caseId", "variant", "repetition", "sessionId", "startedAt", "status", "workflowMs", "checks", "eventIds"];
     requireEvidence(required.every(k => Object.hasOwn(run, k) && Object.hasOwn(row, k) && isDeepStrictEqual(run[k], row[k])) &&
       isDeepStrictEqual(run.toolSpans, row.toolSpans), "A saved journal disagrees with its final trial row.");
-    requireEvidence(typeof row.startedAt === "string" && Number.isFinite(Date.parse(row.startedAt)) && new Date(row.startedAt).toISOString() === row.startedAt && duration(row.workflowMs) && row.workflowMs <= plan.timeoutMs + 5000 &&
-      Array.isArray(row.eventIds) && row.eventIds.every(isUuid) && new Set(row.eventIds).size === row.eventIds.length && statuses.includes(row.status) && object(row.checks));
-    requireEvidence(Object.keys(row.checks).length === checks.length && checks.every(id => Object.hasOwn(row.checks, id) &&
-      (typeof row.checks[id] === "boolean" || (row.status !== "ok" && row.checks[id] === null))));
-    const spans = row.toolSpans === undefined ? [] : row.toolSpans;
-    requireEvidence(Array.isArray(spans) && spans.length <= 32 && new Set(spans.map(s => s?.id)).size === spans.length);
-    const tools = spans.map(s => {
-      requireEvidence(object(s) && isUuid(s.id) && typeof s.name === "string" && /^[a-z][a-z0-9_-]{0,39}$/.test(s.name) &&
-        !/(?:^|[^a-z0-9])(?:sk[-_]|tobs_|dai_|tvly-)/i.test(s.name) && ["ok", "error", "interrupted"].includes(s.status) &&
-        duration(s.startMs) && duration(s.durationMs) && s.startMs + s.durationMs <= row.workflowMs + 1);
-      return { name: s.name, status: s.status, startMs: s.startMs, durationMs: s.durationMs };
-    });
     arms[row.variant] = { status: row.status, checks: row.checks, workflowMs: row.workflowMs, tools };
     if (field !== undefined) arms[row.variant].selectedOutput = selectedOutput(journal.output, field, selectedPath);
   }
+  if (byTool) return {
+    source: "Recorded tool timings in the local copy of the hosted result, matched to its frozen plan",
+    resultId: expectedId, state: result.state, caseId: opts.case, ...summarizeTool(pairs, opts.tool, minDeltaMs)
+  };
+  const arms = pairs[trial - 1];
   requireEvidence(arms.baseline && arms.candidate, "Both original trial journals are needed for this case and repetition.");
   return { source: "Original local SDK journals matched to the local copy of the hosted result", resultId: expectedId, state: result.state,
     caseId: opts.case, trial, baseline: arms.baseline, candidate: arms.candidate };
@@ -146,12 +206,14 @@ try {
   else {
     const { values, positionals, tokens } = parseArgs({ allowPositionals: true, tokens: true, options: {
       result: { type: "string" }, case: { type: "string" }, trial: { type: "string" }, field: { type: "string" },
-      plan: { type: "string" }
+      plan: { type: "string" }, tool: { type: "string" }, "min-delta-ms": { type: "string" }
     } });
     const flags = tokens.filter(item => item.kind === "option");
-    requireEvidence(positionals.length === 1 && values.result && values.case && values.trial &&
+    requireEvidence(positionals.length === 1 && values.result && values.case &&
       new Set(flags.map(item => item.name)).size === flags.length, usage);
-    console.log(JSON.stringify(await inspect(positionals[0], values), null, 2));
+    const summary = await inspect(positionals[0], values);
+    console.log(JSON.stringify(summary, null, 2));
+    if (values.tool && summary.comparableTrials < summary.plannedTrials) process.exitCode = 2;
   }
 } catch (error) {
   console.error(error instanceof EvidenceError ? error.message : usage);

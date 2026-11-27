@@ -38,13 +38,13 @@ function fixture(t) {
     }
   }
   save("result.json", { kind: "experiment", schemaVersion: 1, id, plan, runs: rows, state: "complete" });
-  function run(args = [], result = id) {
-    const p = spawnSync(process.execPath, [command, dir, "--result", result, "--case", "repeat-item", "--trial", "2", ...args], { encoding: "utf8" });
+  function invoke(selection, result = id) {
+    const p = spawnSync(process.execPath, [command, dir, "--result", result, "--case", "repeat-item", ...selection], { encoding: "utf8" });
     assert.doesNotMatch(p.stdout + p.stderr, new RegExp(canary));
     assert.throws(() => readFileSync(armed), { code: "ENOENT" });
     return p;
   }
-  return { dir, app, id, url, read, save, run };
+  return { dir, app, id, url, read, save, invoke, run: (args = [], result) => invoke(["--trial", "2", ...args], result) };
 }
 
 test("reads a hosted pair by result URL and one-based repetition with alternating variant order", t => {
@@ -152,4 +152,64 @@ test("reports an interrupted pair with a missing original output and an unscored
   assert.equal(out.baseline.checks.correct, null);
   assert.equal(out.baseline.tools[0].status, "error");
   assert.equal(out.baseline.selectedOutput.status, "unavailable");
+});
+
+test("pairs all repetitions, unions overlapping spans and uses a strict timing tolerance", t => {
+  const f = fixture(t);
+  const result = f.read("result.json");
+  const span = (startMs, durationMs) => ({ id: randomUUID(), name: "lookup", startMs, durationMs, status: "ok" });
+  for (const row of result.runs) {
+    row.workflowMs = 45;
+    row.toolSpans = row.variant === "baseline" ? [span(10, 5), span(5, 10)]
+      : [span(25, row.repetition * 5), span(2, 15)];
+  }
+  // A timing-only handoff deliberately excludes the private per-trial journals.
+  for (let index = 1; index <= 6; index++) rmSync(join(f.dir, "run-00" + index + ".json"));
+  f.save("result.json", result);
+  const p = f.invoke(["--tool", "lookup"], f.url.href);
+  assert.equal(p.status, 0, p.stderr);
+  const s = JSON.parse(p.stdout);
+  assert.equal(s.comparableTrials, 3); assert.equal(s.plannedTrials, 3);
+  assert.deepEqual(s.slowerTrialIds, [2, 3]);
+  assert.deepEqual(s.trials.map(t => t.deltaMs), [5, 10, 15]);
+  assert.deepEqual(s.trials[0].baseline, { activeMs: 10, calls: 2 });
+  assert.deepEqual(JSON.parse(f.invoke(["--tool", "lookup", "--min-delta-ms", "10"]).stdout).slowerTrialIds, [3]);
+  assert.equal(f.invoke(["--trial", "2"]).status, 2);
+});
+
+test("returns partial coverage with reasons and excludes missing, failed and capped calls", t => {
+  const f = fixture(t);
+  const before = f.read("result.json");
+  function partial(change, trial, arm, reason) {
+    const r = structuredClone(before); change(r); f.save("result.json", r);
+    const p = f.invoke(["--tool", "lookup"]);
+    assert.equal(p.status, 2, p.stderr);
+    const s = JSON.parse(p.stdout);
+    assert.equal(s.comparableTrials, 2);
+    assert.deepEqual(s.slowerTrialIds, []);
+    assert.equal(s.trials[trial - 1][arm].unavailable, reason);
+    assert.equal(s.trials[trial - 1].deltaMs, null);
+  }
+  partial(r => r.runs[0].toolSpans[0].name = "renamed", 1, "baseline", "tool not recorded");
+  partial(r => r.runs[1].telemetryComplete = false, 1, "candidate", "incomplete telemetry");
+  partial(r => r.runs[0].providerCalls++, 1, "baseline", "incomplete telemetry");
+  partial(r => r.runs[3].toolSpans[0].status = "error", 2, "baseline", "unfinished or failed tool call");
+  partial(r => r.runs[2].status = "timeout", 2, "candidate", "timeout");
+  partial(r => r.runs[4].toolSpans = Array.from({ length: 32 }, () => ({ ...r.runs[4].toolSpans[0], id: randomUUID() })), 3, "baseline", "span limit reached");
+  partial(r => { r.state = "interrupted"; r.runs.pop(); }, 3, "candidate", "missing trial");
+  const unknown = f.invoke(["--tool", "never-called"]);
+  assert.equal(JSON.parse(unknown.stdout).comparableTrials, 0);
+});
+
+test("refuses mixed selectors, invalid tolerances and malformed timing metadata", t => {
+  const f = fixture(t);
+  for (const args of [[], ["--tool", "lookup", "--trial", "1"], ["--tool", "lookup", "--field", "stock"],
+    ["--trial", "2", "--min-delta-ms", "1"], ["--tool", "tobs_private"]]) {
+    assert.equal(f.invoke(args).status, 2);
+  }
+  for (const threshold of ["-5", "NaN", "Infinity", "180001", "0.1234"]) {
+    assert.equal(f.invoke(["--tool", "lookup", "--min-delta-ms", threshold]).status, 2);
+  }
+  const bad = f.read("result.json"); bad.runs[5].toolSpans[0].startMs = 9000; f.save("result.json", bad);
+  const p = f.invoke(["--tool", "lookup"]); assert.equal(p.status, 2); assert.equal(p.stdout, "");
 });
