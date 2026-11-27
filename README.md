@@ -68,7 +68,13 @@ To check a repair in your repo, ask your agent: “Check this change against the
 
 ### Review a release with a teammate
 
-To diagnose a **hosted** run, open its private result, expand **Frozen test and trial details**, and choose **View saved outputs** for the affected trial. The two columns show what the app chose to save for each version. If capture was off, the original values are unavailable. A local replay gives you a fresh observation.
+To diagnose a **hosted** run, open its private result and choose **Frozen test and trial details → View saved outputs**. If you have the original Node SDK run directory, ask your coding agent to inspect the case there, even when hosted output capture was off. With the global Agent Pack installed, run this from your project:
+
+```sh
+node "$HOME/.agents/skills/tokensand-agent-pack/scripts/inspect_hosted_trial.mjs" RUN_DIRECTORY --result PRIVATE_RESULT_URL_OR_UUID --case CASE_ID --trial 1
+```
+
+This reads the original local journals and shows both versions’ recorded checks, workflow duration and tool timings. Add `--field stock` or `--field /cursors/east` to see one known non-sensitive scalar. A pointer such as `/items/0/count` selects an array element. Long or sensitive text is omitted. If the plan is elsewhere, add `--plan PATH_TO_PLAN_JSON`. The command matches the saved trial metadata locally. The selected value comes from the journal on disk. Successful tool calls alone cannot identify which call caused a wrong answer. A rerun gives you a new observation.
 
 Use the same pinned private Node SDK for both runs. The reviewer recognizes 0.7.7 and 0.7.8. From a clean candidate checkout, choose the earlier release tag and its saved run. Declare the app code in `sourceFiles`. If the scorer changed, the reviewer flags the saved result for review.
 
