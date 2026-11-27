@@ -2,12 +2,16 @@
 """Review a trusted Vitest 4 repair. For release decisions, use --replay-original-tests to score the original expectations."""
 import argparse
 from collections import Counter
+from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass
 import hashlib
+from io import StringIO
 import json
 import os
 import re
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -122,7 +126,45 @@ def case_name(key, show_names):
     return json.dumps(detail, ensure_ascii=True)[:500] if show_names else "case#" + fingerprint
 
 
-def compare(args, earlier, later, extra_issues=()):
+def passes(cases):
+    return f"{list(cases.values()).count('passed')}/{len(cases)}"
+
+
+def digest(value):
+    encoded = json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def measured_cases(cases, version):
+    return digest([version, sorted(cases.items())])
+
+
+@dataclass
+class ReviewRow:
+    root: Path = None
+    revision: str = "Unavailable"
+    submitted: str = "Unavailable"
+    original: str = "Unavailable"
+    verdict: str = "Unavailable"
+    action: str = "Check the selected files and local Vitest setup, then rerun."
+    submitted_digest: str = ""
+    original_digest: str = ""
+
+    def observe(self, root, tree):
+        from review_vitest_replay import clean_revision
+        self.root = root
+        self.revision = clean_revision(root, tree)
+
+    def confirmed_revision(self):
+        from review_vitest_replay import clean_revision, snapshot
+        if self.revision in ("Uncommitted", "Unavailable"):
+            return self.revision
+        if clean_revision(self.root, snapshot(self.root)) != self.revision:
+            return "Unavailable"
+        return self.revision
+
+
+def compare(args, earlier, later, extra_issues=(), row=None):
     before, old, baseline_controls, first, v1, e1 = earlier
     after, new, candidate_controls, last, v2, e2 = later
     issues = list(dict.fromkeys([*first, *last, *extra_issues]))
@@ -149,6 +191,24 @@ def compare(args, earlier, later, extra_issues=()):
     _, comparable, eligible = review_status(before, after, sources, issues)
     recovered = {key for key in before.keys() & after.keys() if before[key] == "failed" and after[key] == "passed"}
     verified = eligible and bool(recovered)
+    if row is not None:
+        row.verdict = "Verified repair" if verified else "Hold"
+        changed_criteria = any(a != b for _, a, b, _ in sources) or before.keys() != after.keys()
+        if verified:
+            row.action = "Use this repair for the selected cases."
+        elif not implementation or one_sided:
+            row.action = "Check that both suites exercise the intended implementation."
+        elif changed_criteria and not changed_impl:
+            row.action = "The criteria changed and the checked implementation stayed the same. Restore the criteria and repair the implementation."
+        elif changed_criteria:
+            row.action = "Review the changed criteria separately before release."
+        elif issues or any(state not in ("passed", "failed") for state in after.values()):
+            row.action = "Check test coverage and inputs, then rerun the full selection."
+        elif "failed" in after.values():
+            row.action = "Repair the remaining failing cases and rerun."
+        else:
+            row.action = "Reproduce an original failure and verify the implementation change."
+        return 0 if verified else 100
     print(("VERIFIED REPAIR" if verified else "HOLD") + " — selected local Vitest cases")
     print(f"Vitest-reported passes: {list(before.values()).count('passed')}/{len(before)} before, "
           f"{list(after.values()).count('passed')}/{len(after)} after. Vitest exits: {e1}, {e2}.")
@@ -177,7 +237,7 @@ def compare(args, earlier, later, extra_issues=()):
     return 0 if verified else 100
 
 
-def review(args):
+def review(args, note=None):
     before = args.before_root.resolve(strict=True)
     proposals = args.after_root or [Path.cwd()]
     if len(set(args.files)) != len(args.files):
@@ -190,7 +250,12 @@ def review(args):
         if args.replay_original_tests:
             from review_vitest_replay import UNKNOWN_INPUT, original_result, snapshot, tracked_changes
             before_tree = snapshot(before)
+            if note is not None:
+                note[0].observe(before, before_tree)
         earlier = capture(before, args, base)
+        if note is not None:
+            note[0].submitted = passes(earlier[0])
+            note[0].submitted_digest = measured_cases(earlier[0], earlier[4])
         if not args.replay_original_tests:
             from review_vitest_replay import filesystem_data
             before_data = filesystem_data(before, earlier[1])
@@ -198,6 +263,7 @@ def review(args):
         seen = {before}
         decisions = []
         for index, proposal in enumerate(proposals, 1):
+            row = note[index] if note is not None else None
             label = f"Proposal {index} " + json.dumps(proposal.name or ".", ensure_ascii=True)
             if len(proposals) > 1:
                 print(label, flush=True)
@@ -211,7 +277,12 @@ def review(args):
                 directory.mkdir(mode=0o700)
                 if args.replay_original_tests:
                     candidate_tree = snapshot(root)
+                    if row is not None:
+                        row.observe(root, candidate_tree)
                 later = capture(root, args, directory)
+                if row is not None:
+                    row.submitted = passes(later[0])
+                    row.submitted_digest = measured_cases(later[0], later[4])
                 if not args.replay_original_tests:
                     extra = []
                     if before_data is not None:
@@ -231,21 +302,31 @@ def review(args):
                     if tracked_changes(before_tree, candidate_tree) - known:
                         extra.append(UNKNOWN_INPUT)
                 print("Submitted tests")
-                status = compare(args, earlier, later, extra)
+                status = compare(args, earlier, later, extra, row)
                 try:
                     with tempfile.TemporaryDirectory(prefix="original-", dir=directory) as scratch:
                         mode, after = original_result(args, before, root, before_tree, candidate_tree,
                                                       earlier, later, Path(scratch), capture, implementation)
                     failed = [key for key, state in after.items() if state == "failed"]
+                    if row is not None:
+                        row.original = passes(after) + (" (replayed)" if mode == "replayed" else " (same suite)")
+                        row.original_digest = measured_cases(after, later[4])
+                        if failed and mode == "replayed":
+                            row.action = "Fix the remaining original failures. " + row.action
                     print(f"Original tests ({mode}): {len(after)-len(failed)}/{len(after)} passed, {len(failed)} failed.")
                     for key in sorted(failed):
                         print("  Original failure: " + case_name(key, args.show_names))
                 except Invalid as error:
                     print("Original tests: unavailable — " + str(error))
                     unavailable.add(index)
+                    if row is not None:
+                        row.action = ("Name the changed expectation as a test input and rerun." if str(error) == UNKNOWN_INPUT else
+                                      "Check the original suite and its tracked inputs, then rerun.")
                 except (OSError, ValueError, LookupError, RuntimeError, ParseError, subprocess.SubprocessError):
                     print("Original tests: unavailable — could not verify the disposable checkout.")
                     unavailable.add(index)
+                    if row is not None:
+                        row.action = "Restore the test environment and rerun the original suite."
                 return status
 
             status = execute(review_proposal, args)
@@ -267,6 +348,71 @@ def review(args):
         return 1 if unavailable or 1 in statuses else max(statuses)
 
 
+def markdown(args):
+    args.replay_original_tests = True
+    note = [ReviewRow() for _ in range(1 + len(args.after_root or [Path.cwd()]))]
+    # Detailed diagnostics (both streams) can contain private input paths. Only
+    # render the allowlisted decision fields from the same native review.
+    with open(os.devnull, "w") as sink, redirect_stdout(sink), redirect_stderr(sink):
+        status = execute(lambda selected: review(selected, note), args)
+    baseline, *proposals = note
+    base_revision = baseline.confirmed_revision()
+    unbound = {"Unavailable", "Uncommitted"}
+    print("### Tokens& Vitest repair review\n")
+    print(f"Baseline revision: {base_revision}. Baseline passed: {baseline.submitted}.\n")
+    print("| Proposal | Revision | Submitted passed | Original passed | Decision | Next action |")
+    print("| --- | --- | --- | --- | --- | --- |")
+    for index, row in enumerate(proposals, 1):
+        revision = row.confirmed_revision()
+        verdict = row.verdict if row.original != "Unavailable" else "Unavailable"
+        if base_revision in unbound or revision in unbound:
+            status = 1
+            verdict = "Unavailable"
+            if row.original != "Unavailable":
+                row.action = "Rerun on clean, fixed revisions to verify this proposal."
+        print(f"| {index} | {revision} | {row.submitted} | {row.original} | {verdict} | {row.action} |")
+    here = Path(__file__).resolve().parent
+    reviewer = [hashlib.sha256((here / name).read_bytes()).hexdigest() for name in
+                ("review_vitest.py", "review_vitest_replay.py", "review_vitest_reporter.mjs", "review_pytest.py")]
+    fingerprint = digest(["vitest-review-note/1", reviewer, sorted(p.as_posix() for p in args.files),
+                          sorted(p.as_posix() for p in args.implementation), sorted(p.as_posix() for p in args.test_source),
+                          args.config.as_posix() if args.config else None,
+                          [(row.submitted_digest, row.original_digest) for row in note]])
+    print("\nScope and outcomes (SHA-256): " + fingerprint)
+    print("\nCounts cover the selected cases. Reproduce them in the matching checkouts before relying on this note.")
+    return status
+
+
+def verify_markdown(args):
+    limit = 256 * 1024
+    try:
+        # Do not follow a link, wait on a pipe, or read an unbounded attachment.
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        if args.verify_markdown.is_symlink():
+            raise ValueError
+        with os.fdopen(os.open(args.verify_markdown, flags), "rb") as file:
+            info = os.fstat(file.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+                raise ValueError
+            supplied = file.read(limit + 1)
+            if not supplied or len(supplied) > limit:
+                raise ValueError
+    except (OSError, ValueError):
+        print("Review unavailable. Supply a regular local Markdown note of up to 256 KiB.")
+        return 1
+    fresh = StringIO()
+    with redirect_stdout(fresh):
+        status = markdown(args)
+    if status == 1:
+        print("Review unavailable. Check the selected tests and clean revisions, then rerun.")
+        return 1
+    if fresh.getvalue().encode("utf-8") != supplied.replace(b"\r\n", b"\n"):
+        print("Review mismatch. Check the exact revisions, case selection, reviewer and installed dependencies.")
+        return 1
+    print("Review reproduced. " + ("Hold at least one proposal." if status == 100 else "All selected repairs verified."))
+    return status
+
+
 if __name__ == "__main__":
     parser = Arguments(description=__doc__)
     parser.add_argument("--before-root", required=True, type=Path)
@@ -278,6 +424,12 @@ if __name__ == "__main__":
                         help="changed service module; the adjacent same-named module is recognized automatically")
     parser.add_argument("--config", type=relative_path, help="explicit Vitest config relative to each checkout")
     parser.add_argument("--test-source", type=relative_path, action="append", default=[], metavar="FILE")
-    parser.add_argument("--show-names", action="store_true", help="print local testcase names; these can contain private fixture values")
+    output = parser.add_mutually_exclusive_group()
+    output.add_argument("--show-names", action="store_true", help="print local testcase names; these can contain private fixture values")
+    output.add_argument("--markdown", action="store_true", help="review the original suite and print a shareable aggregate Markdown summary")
+    output.add_argument("--verify-markdown", type=Path, metavar="NOTE", help="rerun the original-suite review locally and verify an exact Markdown note")
     parser.add_argument("files", nargs="+", type=relative_path, metavar="TEST_FILE")
-    sys.exit(execute(review, parser.parse_args()))
+    args = parser.parse_args()
+    if args.verify_markdown:
+        sys.exit(verify_markdown(args))
+    sys.exit(markdown(args) if args.markdown else execute(review, args))
