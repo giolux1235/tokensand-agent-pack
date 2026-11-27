@@ -266,8 +266,8 @@ def original_result(args, baseline_root, root, before_tree, candidate_tree, earl
         stable(baseline_root, before_tree)
         stable(root, candidate_tree)
         mode = "replayed"
-    before, old, _, first_issues, v1, _ = early
-    after, new, _, last_issues, v2, _ = checked
+    before, old, _, first_issues, v1, _, _ = early
+    after, new, _, last_issues, v2, _, _ = checked
     if (first_issues or last_issues or v1 != v2 or before.keys() != after.keys()
             or any(s not in ("passed", "failed") for s in [*before.values(), *after.values()])
             or implementations - (old.keys() & new.keys()) or old.keys() != new.keys() or any(old[p] != new[p] for p in old.keys() - implementations)):
