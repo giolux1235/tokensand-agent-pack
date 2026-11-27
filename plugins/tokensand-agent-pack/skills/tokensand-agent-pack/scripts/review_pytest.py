@@ -4,8 +4,11 @@ import argparse
 import configparser
 import hashlib
 import json
+import os
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -22,7 +25,7 @@ class ReportTree(ET.TreeBuilder):
 class Arguments(argparse.ArgumentParser):
     def error(self, message):
         self.print_usage(sys.stderr)
-        self.exit(1, "INVALID: check report paths, checkout roots, and --test-source arguments.\n")
+        self.exit(1, "INVALID: check the requested paths, test selection and checkout roots.\n")
 
 
 ATTACHMENTS = {"properties", "system-out", "system-err"}
@@ -135,22 +138,22 @@ def source_sha(root, relative, compare_settings=False):
     return digest.hexdigest()
 
 
-def case_label(key):
+def case_label(key, *, native=False):
     group, name = key
     stem, param, _ = name.partition("[")
     fingerprint = hashlib.sha256(json.dumps(key, ensure_ascii=True).encode()).hexdigest()[:12]
-    if not re.fullmatch(r"[A-Za-z0-9_.]*", group) or not re.fullmatch(r"[A-Za-z0-9_]+", stem):
+    safe_group = re.fullmatch(r"[A-Za-z0-9_.]*", group)
+    if native:
+        safe_group = (not Path(group).is_absolute() and ".." not in Path(group).parts
+                      and re.fullmatch(r"[A-Za-z0-9_./-]*(?:::[A-Za-z0-9_]+)*", group))
+    if not safe_group or not re.fullmatch(r"[A-Za-z0-9_]+", stem):
         return "case#" + fingerprint
     return (group + "::" if group else "") + stem + ("[id#" + fingerprint + "]" if param else "")
 
 
-def review(args):
-    before, after = read_report(args.before), read_report(args.after)
-    roots = [path.resolve(strict=True) for path in (args.before_root, args.after_root)]
-    if not all(root.is_dir() for root in roots):
-        raise Invalid("checkout roots must be directories")
-    declared = dict.fromkeys(args.test_source)
-    controls = set()
+def test_sources(roots, paths, active_configs=()):
+    declared = dict.fromkeys(paths)
+    controls = set(active_configs)
     for relative in declared:
         if relative.is_absolute() or ".." in relative.parts or not relative.parts:
             raise Invalid("use a checkout-relative test source path")
@@ -162,17 +165,30 @@ def review(args):
             if relative in declared:
                 raise Invalid("declared test source missing from both checkouts")
             continue
-        sources.append((relative, old, new))
-    same_sources = all(old == new for _, old, new in sources)
-    comparable = same_sources and before.keys() == after.keys()
+        sources.append((relative, old, new, relative in declared))
+    return sources
+
+
+def verdict(before, after, sources, *, pytest_exits=None, issues=()):
+    native = pytest_exits is not None
+    same_sources = all(old == new for _, old, new, _ in sources)
+    comparable = same_sources and before.keys() == after.keys() and not issues
     eligible = (comparable
                 and all(state in {"passed", "failed"} for state in before.values())
                 and all(state == "passed" for state in after.values()))
-    print(("PASS" if eligible else "HOLD") + " — pytest JUnit report review")
-    print(f"Baseline passed {list(before.values()).count('passed')}/{len(before)}; candidate passed {list(after.values()).count('passed')}/{len(after)}.")
-    for path, old, new in sources:
+    mode = "native pytest review" if native else "pytest JUnit report review (XML outcomes only)"
+    print(("PASS" if eligible else "HOLD") + " — " + mode)
+    for issue in issues:
+        print(issue)
+    old_passes, new_passes = list(before.values()).count("passed"), list(after.values()).count("passed")
+    if native:
+        print(f"Ordinary passes were {old_passes}/{len(before)} before and {new_passes}/{len(after)} after. "
+              f"Pytest exited {pytest_exits[0]} before and {pytest_exits[1]} after.")
+    else:
+        print(f"Baseline passed {old_passes}/{len(before)}; candidate passed {new_passes}/{len(after)}.")
+    for path, old, new, is_declared in sources:
         detail = old if old == new else f"{old or 'missing'} -> {new or 'missing'} (changed)"
-        label = "Declared source" if path in declared else "Ancestor control"
+        label = "Declared source" if is_declared else ("Pytest control" if native else "Ancestor control")
         print(f"{label} {json.dumps(str(path))}: {detail}")
     if not same_sources:
         print("Test sources or fixture/config files changed. Rerun both implementations with the same controls.")
@@ -183,25 +199,184 @@ def review(args):
         if old == new == "passed":
             continue
         label = " (recovered)" if comparable and (old, new) == ("failed", "passed") else ""
-        print(f"{case_label(key)}: {old} -> {new}{label}")
-    print(SCOPE)
+        print(f"{case_label(key, native=native)}: {old} -> {new}{label}")
+    if native:
+        outcomes = set(before.values()) | set(after.values())
+        if "xfailed-before-call" in outcomes:
+            print("An expected failure was reported during setup. Its test body did not run.")
+        if "xpassed-strict" in outcomes:
+            print("A strict unexpected pass fails the native pytest policy.")
+        if outcomes & {"xpassed", "xpassed-strict"}:
+            print("An expected failure passed its assertion. Review the expectation and rerun both revisions under the same policy.")
+        print("Local runs. The decision covers the selected cases and compared test sources. Declare imported fixtures and data with --test-source.")
+    else:
+        print(SCOPE + " With both checkouts, use --run for native pytest outcomes.")
     return 0 if eligible else 100
 
 
+def checkout_roots(args):
+    roots = [path.resolve(strict=True) for path in (args.before_root, args.after_root)]
+    if not all(root.is_dir() for root in roots):
+        raise Invalid("checkout roots must be directories")
+    return roots
+
+
+def read_review(args):
+    before, after = read_report(args.before), read_report(args.after)
+    return verdict(before, after, test_sources(checkout_roots(args), args.test_source))
+
+
+def native_interpreter(root, override):
+    if override:
+        path = Path(override)
+        return path if path.is_absolute() else root / path
+    venv = root / ".venv"
+    if venv.is_dir():
+        return venv / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    return Path(sys.executable)
+
+
+def interpreter_environment(interpreter):
+    env = os.environ.copy()
+    old_venv = env.pop("VIRTUAL_ENV", None)
+    directories = os.get_exec_path(env)
+    if old_venv:
+        previous = Path(old_venv)
+        directories = [directory for directory in directories
+                       if Path(directory) not in (previous / "bin", previous / "Scripts")]
+    env["PATH"] = os.pathsep.join([str(interpreter.parent), *directories])
+    venv = interpreter.parent.parent
+    if (venv / "pyvenv.cfg").is_file():
+        env["VIRTUAL_ENV"] = str(venv)
+        env.pop("PYTHONHOME", None)
+    return env
+
+
+NATIVE_ISSUES = {
+    "runxfail": "--runxfail disabled expected-failure handling. Rerun with the project's normal marker policy.",
+    "distributed": "Distributed coverage is unavailable. Use a single pytest worker for this review.",
+    "external_config": "The active pytest configuration is outside its checkout.",
+    "deselected": "Pytest deselected cases. Check the selection and the project’s default options.",
+    "collection_error": "Pytest could not collect the target. Run the target directly for its collection error.",
+    "empty": "No selected cases were collected.",
+    "interrupted": "Pytest was interrupted.",
+    "session_error": "Pytest session policy and case outcomes did not agree.",
+    "duplicate": "A test ran more than once. Review the individual attempts.",
+    "incomplete": "A complete run was unavailable for every selected case.",
+    "unsupported": "The environment produced an unsupported pytest outcome or configuration.",
+    "multiple_outcomes": "More than one phase of a case reported an outcome. Inspect the native run.",
+}
+
+
+def native_run(root, interpreter, targets, destination, arm):
+    if not interpreter.is_file():
+        raise Invalid(f"The {arm} interpreter is missing. Set --{arm}-python to this checkout’s Python with pytest installed.")
+    helper = Path(__file__).with_name("capture_pytest.py").resolve(strict=True)
+    # The child uses the project's own environment. Test output and marker reasons stay private.
+    result = subprocess.run([str(interpreter), str(helper), str(destination), *targets], cwd=root, env=interpreter_environment(interpreter),
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if not destination.is_file():
+        raise Invalid(f"The {arm} run produced no native result. Check --{arm}-python and run the selection locally with python -m pytest.")
+    if destination.stat().st_size > LIMIT:
+        raise Invalid(f"The {arm} native result exceeds 16 MiB.")
+    record = json.loads(destination.read_text(encoding="utf-8"))
+    if (not isinstance(record, dict) or record.get("version") != 1 or record.get("exit") != result.returncode
+            or not isinstance(record.get("cases"), list) or not isinstance(record.get("issues"), list)):
+        raise Invalid(f"The {arm} native result is incomplete.")
+    issues = []
+    for issue in record["issues"]:
+        if not isinstance(issue, str) or issue not in NATIVE_ISSUES:
+            raise Invalid(f"The {arm} run has an unknown session status.")
+        issues.append(f"{arm}: {NATIVE_ISSUES[issue]}")
+    if result.returncode not in (0, 1) or not record["cases"]:
+        raise Invalid(f"The {arm} selection produced no usable decision (pytest exit {result.returncode}). "
+                      + (" ".join(issues) or "Run the same target with python -m pytest in that checkout."))
+    if "active_config" not in record or "active_config_sha256" not in record:
+        raise Invalid(f"The {arm} run omitted its active configuration evidence.")
+    config, digest = record["active_config"], record["active_config_sha256"]
+    if config is not None:
+        if (not isinstance(config, str) or not config or Path(config).is_absolute() or ".." in Path(config).parts
+                or not isinstance(digest, str) or not re.fullmatch("[0-9a-f]{64}", digest)):
+            raise Invalid(f"The {arm} run has invalid pytest configuration evidence.")
+        config = Path(config)
+    elif digest is not None:
+        raise Invalid(f"The {arm} configuration digest has no corresponding file.")
+    states = {"passed", "failed", "error", "skipped", "xfailed", "xfailed-before-call", "xpassed", "xpassed-strict"}
+    cases = {}
+    for row in record["cases"]:
+        if not isinstance(row, list) or len(row) != 2 or not all(isinstance(v, str) for v in row):
+            raise Invalid(f"The {arm} result contains an invalid case.")
+        nodeid, state = row
+        if not nodeid or state not in states:
+            raise Invalid(f"The {arm} result contains an unsupported native outcome.")
+        # Partition before the parameters: a parameter value may itself contain "::".
+        stem, bracket, param = nodeid.partition("[")
+        group, _, name = stem.rpartition("::")
+        key = (group, name + bracket + param)
+        if key in cases:
+            raise Invalid(f"The {arm} result contains duplicate case identities.")
+        cases[key] = state
+    return cases, issues, result.returncode, config, digest
+
+
+def run_review(args):
+    roots = checkout_roots(args)
+    if roots[0] == roots[1]:
+        raise Invalid("Choose separate earlier and later checkouts.")
+    files = []
+    for target in args.targets:
+        name = target.split("::", 1)[0]
+        path = Path(name)
+        if not name or name.startswith(("-", "@")) or path.is_absolute() or ".." in path.parts:
+            raise Invalid("Select a checkout-relative test file or pytest node ID.")
+        if any(not (root / path).is_file() or not (root / path).resolve().is_relative_to(root) for root in roots):
+            raise Invalid("A selected file is missing or outside its checkout. Select a file present in both revisions.")
+        files.append(path)
+    sources = test_sources(roots, files + args.test_source)
+    with tempfile.TemporaryDirectory(prefix="tokensand-pytest-") as temp:
+        before, first_issues, before_exit, before_config, before_digest = native_run(roots[0], native_interpreter(roots[0], args.before_python),
+                                         args.targets, Path(temp, "before.json"), "before")
+        after, last_issues, after_exit, after_config, after_digest = native_run(roots[1], native_interpreter(roots[1], args.after_python),
+                                       args.targets, Path(temp, "after.json"), "after")
+    issues = first_issues + last_issues
+    if sources != test_sources(roots, files + args.test_source):
+        issues.append("A declared test source changed during execution. Review the changes and rerun.")
+    if before_config != after_config:
+        issues.append("The checkouts used different active pytest configurations.")
+    configs = [path for path in (before_config, after_config) if path is not None]
+    for root, config, digest in zip(roots, (before_config, after_config), (before_digest, after_digest)):
+        if config is not None and source_sha(root, config) != digest:
+            issues.append("The active pytest configuration changed during execution.")
+    sources = test_sources(roots, files + args.test_source, configs)
+    return verdict(before, after, sources, pytest_exits=(before_exit, after_exit), issues=issues)
+
+
 def main():
-    parser = Arguments(description=__doc__, epilog=SCOPE)
+    if sys.argv[1:2] == ["--run"]:
+        parser = Arguments(description="Run the same existing pytest cases in two trusted checkouts.")
+        parser.add_argument("--before-root", required=True, type=Path)
+        parser.add_argument("--after-root", default=Path.cwd(), type=Path)
+        parser.add_argument("--before-python", metavar="INTERPRETER", help="absolute path or path relative to the earlier checkout")
+        parser.add_argument("--after-python", metavar="INTERPRETER", help="absolute path or path relative to the later checkout")
+        parser.add_argument("--test-source", action="append", type=Path, default=[], metavar="RELATIVE_PATH")
+        parser.add_argument("targets", nargs="+", metavar="FILE[::NODE]")
+        return execute(run_review, parser.parse_args(sys.argv[2:]))
+    parser = Arguments(description=__doc__, epilog="Use --run --help to review native pytest outcomes from two trusted checkouts.")
     parser.add_argument("before", type=Path, metavar="BEFORE_XML")
     parser.add_argument("after", type=Path, metavar="AFTER_XML")
     parser.add_argument("--before-root", required=True, type=Path)
     parser.add_argument("--after-root", required=True, type=Path)
     parser.add_argument("--test-source", required=True, type=Path, action="append", metavar="RELATIVE_PATH")
-    args = parser.parse_args()
+    return execute(read_review, parser.parse_args())
+
+
+def execute(action, args):
     try:
-        return review(args)
+        return action(args)
     except Invalid as exc:
         print("INVALID: " + str(exc), file=sys.stderr)
     except (OSError, ET.ParseError, RuntimeError, LookupError, ValueError):
-        print("INVALID: could not read the declared files or parse the JUnit XML.", file=sys.stderr)
+        print("INVALID: could not read the selected checkouts, interpreters or test evidence.", file=sys.stderr)
     return 1
 
 

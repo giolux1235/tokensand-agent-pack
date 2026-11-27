@@ -70,25 +70,25 @@ Release review and replay exit `100` for a verified regression, `2` for inconclu
 
 ### Review an existing Python test
 
-Start in the later checkout with the skill installed. Use the same shell for these commands. Set the path to your earlier checkout and the test you want to review. Run each checkout with its own installed dependencies.
+From the later checkout, ask Codex or Claude Code to run the same pytest target against the earlier checkout and show which cases recovered. With the global skill installed, you can also run one command.
 
 ```sh
-earlier=../earlier-service
-target=tests/test_workflow.py
-reports=$(mktemp -d)
-(cd "$earlier" && python -m pytest -q "$target" --junitxml="$reports/before.xml")
-python -m pytest -q "$target" --junitxml="$reports/after.xml"
+python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_pytest.py" --run --before-root ../earlier-service tests/test_workflow.py
 ```
 
-A failing test still produces a report. Once both runs finish, review their results locally:
+Choose a trusted offline test file or a pytest node ID. Each checkout uses its own `.venv` when present, otherwise the Python running the reviewer. For another environment, pass its interpreter path with `--before-python` or `--after-python`. For a project-local skill, use `.agents/skills` or `.claude/skills` in the script path.
+
+The reviewer runs pytest once per checkout. It holds unexpected passes, skipped cases, incomplete runs and changed tests for review. An unexpected pass means the assertion passed while its expected-failure marker was active. A clean repair under the same controls exits 0, a held decision exits 100, and a setup error exits 1. The review shows case outcomes. Run the named test directly for its traceback. Tests and plugins keep their own network and tracing settings.
+
+The reviewer compares the selected tests, ancestor `conftest.py` files and active pytest configuration. Add imported fixtures, data or additional configuration with `--test-source PATH`.
+
+If you already have JUnit XML, the existing report-only command still works.
 
 ```sh
-python3 .agents/skills/tokensand-agent-pack/scripts/review_pytest.py "$reports/before.xml" "$reports/after.xml" --before-root "$earlier" --after-root . --test-source "$target"
+python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_pytest.py" before.xml after.xml --before-root ../earlier-service --after-root . --test-source tests/test_workflow.py
 ```
 
-For Claude Code, use `.claude/skills` in the reviewer path. Pass each test file in the reports. The reviewer checks parent directories up to each checkout root for `conftest.py` and pytest configuration. Changed fixture code or pytest settings hold the repair for review. In shared config files such as `pyproject.toml`, it compares pytest settings when it can read them. A full-file hash is used otherwise.
-
-Add imported fixture helpers, data and custom configuration with `--test-source` to compare those entire files. To locate a fixture, run `python -m pytest --fixtures-per-test "$target"` in the trusted checkout. Check the original pytest summaries for unexpected passes. Keep the XML reports local.
+XML can report a non-strict unexpected pass as an ordinary pass. Use the native run for that decision. [pytest expected-failure behavior](https://docs.pytest.org/en/stable/how-to/skipping.html#strict-parameter)
 
 ### Run a local check without installing a package
 
