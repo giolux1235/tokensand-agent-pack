@@ -12,6 +12,25 @@ SCRIPT = ROOT / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/script
 
 
 class PythonRelease(unittest.TestCase):
+    def test_installed_and_standalone_runners_match_the_same_baseline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.11-py3-none-any.whl") as wheel:
+                self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
+                wheel.extractall(root / "package")
+            adapter = ROOT / "examples/incremental-sync.py"
+            for command in ([sys.executable, str(SCRIPT)], [sys.executable, "-m", "tokensand_check"]):
+                for repaired in ("0", "1"):
+                    with self.subTest(command=command[-1], repaired=repaired):
+                        run = subprocess.run([*command, "--compare-baseline", "--offline-workflow", str(adapter)],
+                            cwd=root, capture_output=True, text=True, timeout=10,
+                            env={"PATH": os.defpath, "PYTHONPATH": str(root / "package"), "FIX_CURSOR": repaired})
+                        self.assertEqual(run.returncode, 0 if repaired == "1" else 1, run.stderr)
+                        self.assertIn('Passed both:', run.stderr)
+                        self.assertIn("New failures: 0", run.stderr)
+                        expected = "Passed both" if repaired == "1" else "Existing failure"
+                        self.assertIn(f'{expected}: "resume-tied-page" / "complete"', run.stderr)
+
     def test_declared_trials_expose_intermittent_failure(self):
         import runpy
         case_suite = runpy.run_path(str(SCRIPT))["case_suite"]
@@ -51,7 +70,7 @@ class PythonRelease(unittest.TestCase):
             self.assertEqual(source.count(marker), 1)
             edited.write_text(source.replace(marker, adapter + marker))
             original = edited.read_bytes()
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.10-py3-none-any.whl") as current:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.11-py3-none-any.whl") as current:
                 current.extractall(project / "wheel")
             for guide, command in documented:
                 with self.subTest(guide=guide.name):
@@ -64,7 +83,7 @@ class PythonRelease(unittest.TestCase):
                     self.assertEqual(edited.read_bytes(), original)
 
     def test_shipped_runner(self):
-        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.10-py3-none-any.whl") as wheel:
+        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.11-py3-none-any.whl") as wheel:
             self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
         for repair, outage, code, message in [
             ("0", "0", 1, "Failed checks: Return every remaining record"),
