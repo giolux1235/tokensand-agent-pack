@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -74,4 +74,20 @@ test("genuine failed, unscored, throwing and passing candidates still run", t =>
     assert.match(output, /invoice/);
     assert.doesNotMatch(output, /could not initialize|workflow file not found/i);
   }
+});
+
+test("the installed guide's first adapter checks the real service against fixed expectations", t => {
+  const guide = readFileSync(new URL("../plugins/tokensand-agent-pack/skills/tokensand-agent-pack/SKILL.md", import.meta.url), "utf8");
+  const example = guide.match(/```js\n(import \{ summarize \}[^]*?)\n```/);
+  assert.ok(example, "Missing copyable order-service adapter");
+  const app = service(t);
+  app.directory("src");
+  app.write(adapter, example[1]);
+  app.write("src/orders.mjs", "export const summarize = quantities => ({ units: quantities[0] });");
+  const failed = app.run(adapter, 1);
+  assert.match(failed, /combined/);
+  assert.match(failed, /pass 1/);
+  assert.match(failed, /fail 1/);
+  app.write("src/orders.mjs", "export const summarize = quantities => ({ units: quantities.reduce((sum, n) => sum + n, 0) });");
+  assert.match(app.run(adapter, 0), /pass 2/);
 });

@@ -21,9 +21,26 @@ For a Python repair, run `python3 SKILL_DIR/scripts/review_pytest.py --run --bef
 
 When a builder asks to show existing pytest results in their private app, keep any working reporter. Otherwise have them enable **Repository checks** in their app, identify one trusted workflow test file and use the app’s existing ingestion key and URL without displaying them. In its pytest environment, install `https://github.com/giolux1235/tokensand-agent-pack/releases/download/pytest-checks-0.1.1/tokensand_pytest_checks-0.1.1-py3-none-any.whl` and run `python -m tokensand_pytest connect APP_ID TEST_FILE`. Add `--queue-offline` only if requested. Run the full file as usual and show the failed case and receipt status. A local review or a request to check a change alone keeps results local.
 
-Inspect trusted adapters for network calls before running them.
+For a requested reusable Node evaluation, reuse the service’s adapter. If it has none, create `observe.workflow.mjs` around the service’s real function and documented result fields.
 
-When asked to connect a project once, reuse its real offline `observe.workflow.mjs` or create one around its workflow and expected results with a zero provider budget. Run `npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.26/tokensand-workflow-check-0.1.26.tgz --install-test` in the npm project. Add `--github` at the Git repository root for self-contained cases on PRs and default-branch pushes. Check the result, show any failed case and commit only the setup locally if the Git tree started clean. Otherwise list setup files for the builder. Subsequent changes use `npm test` or `npm run test:tokensand:watch`. Hosted reporting and project publication remain separate choices. On failure, run the printed case replay to inspect local tool status and timing. After repair, run the full suite.
+```js
+import { summarize } from "./src/orders.mjs";
+
+export default {
+  maxCallsPerRun: { candidate: 0 },
+  cases: [
+    { id: "single", input: { quantities: [2], expectedUnits: 2 } },
+    { id: "combined", input: { quantities: [2, 3], expectedUnits: 5 } },
+  ],
+  checks: [{ id: "units", label: "Return the total units ordered" }],
+  candidate: ({ quantities }) => summarize(quantities),
+  evaluate: ({ input, output }) => ({ units: output.units === input.expectedUnits }),
+};
+```
+
+Cover the reported problem and a known-good control. Check every stable public field that matters to the decision against fixed expectations and check variable fields against their required invariants. Inspect any unfamiliar adapter for network calls before running it and use local fixtures for external dependencies.
+
+To connect it once, run `npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.26/tokensand-workflow-check-0.1.26.tgz --install-test` in the npm project. Add `--github` at the Git repository root for self-contained cases on PRs and default-branch pushes. Check the result, show any failed case and commit only the setup locally if the Git tree started clean. Otherwise list setup files for the builder. Subsequent changes use `npm test` or `npm run test:tokensand:watch`. Hosted reporting and project publication remain separate choices. On failure, run the printed case replay to inspect local tool status and timing. After repair, run the full suite.
 
 The skill bundles two local runners. Resolve `SKILL_DIR` to the directory containing this SKILL.md. From the service directory, run the command matching its trusted adapter:
 
