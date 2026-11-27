@@ -261,6 +261,18 @@ node .agents/skills/tokensand-agent-pack/scripts/check_workflow.mjs --offline-wo
 
 The example has three failing cases. Connect the candidate to your app’s reporting function, then rerun. The check runs locally without a Tinybird account. [Challenge and partner docs](https://tokensand.com/challenges#idea-partner-tinybird-agent-telemetry).
 
+### Check an agent’s memory after a correction
+
+This [offline Cognee challenge example](examples/memory-refresh-v1.mjs) uses synthetic notes. From your app repository, download it into a new directory and run it with Node 20.19 or later.
+
+```sh
+mkdir tokensand-memory-example &&
+curl -fsSL --remove-on-error -o tokensand-memory-example/memory-refresh-v1.mjs https://raw.githubusercontent.com/giolux1235/tokensand-agent-pack/main/examples/memory-refresh-v1.mjs &&
+npx --yes https://tokensand.com/packages/tokensand-workflow-check-0.1.1.tgz --offline-workflow ./tokensand-memory-example/memory-refresh-v1.mjs
+```
+
+The first run fails `corrected-fact` because the lookup returns the old room. Replace `recall` with your app’s local memory lookup, keep the expectations, and rerun the `npx` line. The example needs no account and makes no Cognee calls.
+
 ## Connect Cursor or access saved work
 
 Install the Cursor plugin, reload Cursor and ask Tokens& to check your change. The plugin includes the workflow skill and MCP. [Connect your agent](https://tokensand.com/agents/install?mode=developer)
