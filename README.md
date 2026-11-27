@@ -50,10 +50,12 @@ The agent opens the edition the publisher linked and runs its checks in a separa
 python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/inspect_shared_project.py" 'https://tokensand.com/p/transaction-cursor-check-1'
 ```
 
-Open the linked file and inspect its instructions. For a README, check out its printed revision before running commands that use relative paths. For a Python file that defines a Tokens& workflow, run the check below against your local copy. Rerun the same check with the repair documented by its author. If the publisher linked only a repository, record the revision you actually test.
+Open the linked file and inspect its instructions. For a README, check out its printed revision before running commands that use relative paths. If the publisher linked only a repository, record the revision you actually test. For the cursor example above, run these commands from the root of the linked checkout at its printed revision. The second run enables the documented repair.
 
 ```sh
-python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/check_workflow.py" --offline-workflow ./incremental-sync.py
+checker="$HOME/.agents/skills/tokensand-agent-pack/scripts/check_workflow.py"
+python3 "$checker" --offline-workflow ./examples/incremental-sync.py
+FIX_CURSOR=1 python3 "$checker" --offline-workflow ./examples/incremental-sync.py
 ```
 
 **Check your own project** opens setup for your own app.
