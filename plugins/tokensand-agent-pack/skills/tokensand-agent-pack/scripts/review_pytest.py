@@ -40,7 +40,7 @@ SCOPE = ("User-supplied report/checkout pairing. Source hashes describe the file
          "This review does not authorize a release.")
 
 
-def read_report(path):
+def read_report(path, *, vitest_rows=False):
     if not path.is_file():
         raise Invalid("report must be a regular file")
     with path.open("rb") as stream:
@@ -65,6 +65,10 @@ def read_report(path):
             if case.tag != "testcase" or not name or not name.strip() or "classname" not in case.attrib:
                 raise Invalid("testcase identity or suite structure is invalid")
             key = (case.get("classname"), name)
+            if vitest_rows:
+                # Native Vitest independently supplies identity and source location.
+                # Keep every JUnit row only to cross-check its named outcome multiset.
+                key += (len(rows),)
             tags = [child.tag for child in case if child.tag not in ATTACHMENTS]
             if any(tag not in OUTCOMES for tag in tags) or len(tags) != len(set(tags)):
                 raise Invalid("unsupported or repeated testcase outcome")
@@ -169,13 +173,18 @@ def test_sources(roots, paths, active_configs=()):
     return sources
 
 
-def verdict(before, after, sources, *, pytest_exits=None, issues=(), defining_sources=()):
-    native = pytest_exits is not None
+def review_status(before, after, sources, issues):
     same_sources = all(old == new for _, old, new, _ in sources)
     comparable = same_sources and before.keys() == after.keys() and not issues
     eligible = (comparable
                 and all(state in {"passed", "failed"} for state in before.values())
                 and all(state == "passed" for state in after.values()))
+    return same_sources, comparable, eligible
+
+
+def verdict(before, after, sources, *, pytest_exits=None, issues=(), defining_sources=()):
+    native = pytest_exits is not None
+    same_sources, comparable, eligible = review_status(before, after, sources, issues)
     mode = "native pytest review" if native else "pytest JUnit report review (XML outcomes only)"
     print(("PASS" if eligible else "HOLD") + " — " + mode)
     for issue in issues:
