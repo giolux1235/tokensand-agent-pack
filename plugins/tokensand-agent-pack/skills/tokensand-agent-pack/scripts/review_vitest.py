@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run selected, trusted Vitest 4 test files in two local checkouts."""
+"""Review proposed repairs against a fresh baseline from the same trusted Vitest 4 tests."""
 import argparse
 from collections import Counter
 import hashlib
@@ -43,7 +43,7 @@ def capture(root, args, directory):
     env = {key: os.environ[key] for key in ("PATH", "HOME", "TMPDIR", "TEMP", "SystemRoot", "USERPROFILE", "LANG")
            if key in os.environ}
     env.update(CI="1", NO_COLOR="1", TOKENSAND_VITEST_RECEIPT=str(receipt))
-    command = ["node", str(package / "vitest.mjs"), "run", "--no-update", "--allowOnly=false", "--includeTaskLocation",
+    command = ["node", str(package / "vitest.mjs"), "run", "--no-cache", "--no-update", "--allowOnly=false", "--includeTaskLocation",
                "--reporter=junit", "--reporter=" + str(REPORTER), "--outputFile.junit=" + str(xml)]
     if args.config:
         command += ["--config", str(args.config)]
@@ -95,17 +95,9 @@ def capture(root, args, directory):
     return cases, controls, protected, issues, version, run.returncode
 
 
-def review(args):
-    roots = [path.resolve(strict=True) for path in (args.before_root, args.after_root)]
-    if roots[0] == roots[1] or len(set(args.files)) != len(args.files):
-        raise Invalid("use two distinct checkouts and each selected test file once")
-    with tempfile.TemporaryDirectory(prefix="tokensand-vitest-") as work:
-        runs = []
-        for name, root in zip(("before", "after"), roots):
-            directory = Path(work) / name
-            directory.mkdir(mode=0o700)
-            runs.append(capture(root, args, directory))
-    (before, old, baseline_controls, first, v1, e1), (after, new, candidate_controls, last, v2, e2) = runs
+def compare(args, earlier, later):
+    before, old, baseline_controls, first, v1, e1 = earlier
+    after, new, candidate_controls, last, v2, e2 = later
     issues = list(dict.fromkeys(first + last))
     if v1 != v2:
         issues.append("The installed Vitest versions differ.")
@@ -123,9 +115,18 @@ def review(args):
                 implementation.update(adjacent)
     if implementation & protected or implementation - loaded:
         raise Invalid("implementation files must be reached local modules, separate from tests and controls")
-    changed_impl = {path for path in implementation if old.get(path) != new.get(path)}
-    if not changed_impl:
-        issues.append("No changed implementation was identified. Use --implementation FILE for the intended service module.")
+    one_sided = implementation & (old.keys() ^ new.keys())
+    changed_impl = {path for path in implementation - one_sided if old[path] != new[path]}
+    if not implementation:
+        issues.append("No implementation was identified. Use --implementation FILE for the intended service module.")
+    elif one_sided:
+        for path in sorted(one_sided):
+            checkout = "baseline" if path in old else "candidate"
+            issues.append(f"Implementation reached only in the {checkout}: " + json.dumps(path.as_posix(), ensure_ascii=True) +
+                          ". Verify both test runs exercise the same service module.")
+    elif not changed_impl:
+        known = ", ".join(json.dumps(path.as_posix(), ensure_ascii=True) for path in sorted(implementation))
+        issues.append("Implementation unchanged: " + known + ".")
     if (old.keys() ^ new.keys()) - implementation:
         issues.append("The runs loaded different tests, controls or undeclared local imports.")
     sources = [(path, old.get(path), new.get(path), True) for path in sorted(loaded - implementation)]
@@ -142,6 +143,8 @@ def review(args):
     for path, lhs, rhs, _ in sources:
         if lhs != rhs:
             print("Changed test, control or local import: " + json.dumps(path.as_posix(), ensure_ascii=True))
+    if implementation and not (changed_impl or one_sided) and any(old.get(path) != new.get(path) for path in args.files):
+        print("The selected test changed while its identified implementation stayed identical. Keep the original assertions and fix the implementation.")
     if before.keys() != after.keys():
         print("The named test roster changed.")
     if not recovered:
@@ -153,17 +156,59 @@ def review(args):
         fingerprint = hashlib.sha256(json.dumps(key, ensure_ascii=True).encode()).hexdigest()[:12]
         detail = [key[0] + (f":{key[3]}:{key[4]}" if key[3] else ""), key[1]]
         label = json.dumps(detail, ensure_ascii=True)[:500] if args.show_names else "case#" + fingerprint
-        print(f"{label}: {was} -> {now}" + (" (recovered)" if comparable and key in recovered else ""))
-    if not args.show_names:
-        print("Use --show-names locally to display the test file and full case name.")
-    print("Scope: selected tests, reached local modules, active settings and bound snapshots. Declare files read outside the module graph with --test-source.")
+        transition = ""
+        if key in recovered:
+            transition = " (recovered)" if comparable else " (recovery unverified)"
+        print(f"{label}: {was} -> {now}" + transition)
     return 0 if verified else 100
+
+
+def review(args):
+    before = args.before_root.resolve(strict=True)
+    proposals = args.after_root or [Path.cwd()]
+    if len(set(args.files)) != len(args.files):
+        raise Invalid("select each test file once")
+    if len(proposals) == 1 and proposals[0].resolve(strict=True) == before:
+        raise Invalid("use two distinct checkouts")
+    with tempfile.TemporaryDirectory(prefix="tokensand-vitest-") as work:
+        base = Path(work) / "before"
+        base.mkdir(mode=0o700)
+        earlier = capture(before, args, base)
+        seen = {before}
+        decisions = []
+        for index, proposal in enumerate(proposals, 1):
+            label = f"Proposal {index} " + json.dumps(proposal.name or ".", ensure_ascii=True)
+            if len(proposals) > 1:
+                print(label, flush=True)
+
+            def review_proposal(_):
+                root = proposal.resolve(strict=True)
+                if root in seen:
+                    raise Invalid("select a distinct candidate checkout once; the baseline cannot be a candidate")
+                seen.add(root)
+                directory = Path(work) / str(index)
+                directory.mkdir(mode=0o700)
+                return compare(args, earlier, capture(root, args, directory))
+
+            status = execute(review_proposal, args)
+            decisions.append((label, status))
+        if len(decisions) > 1:
+            print("Release decision for the selected cases:")
+            for label, status in decisions:
+                print(f"  {label}: " + {0: "VERIFIED REPAIR", 100: "HOLD", 1: "INVALID"}[status])
+        statuses = [status for _, status in decisions]
+        if any(status != 1 for status in statuses):
+            if not args.show_names:
+                print("Use --show-names locally to display the test file and full case name.")
+            print("Scope: selected tests, reached local modules, active settings and bound snapshots. Declare files read outside the module graph with --test-source.")
+        return 1 if 1 in statuses else max(statuses)
 
 
 if __name__ == "__main__":
     parser = Arguments(description=__doc__)
     parser.add_argument("--before-root", required=True, type=Path)
-    parser.add_argument("--after-root", default=Path.cwd(), type=Path)
+    parser.add_argument("--after-root", type=Path, action="append", metavar="CHECKOUT",
+                        help="candidate checkout (default: current directory); repeat to review multiple proposals")
     parser.add_argument("--implementation", type=relative_path, action="append", default=[], metavar="FILE",
                         help="changed service module; the adjacent same-named module is recognized automatically")
     parser.add_argument("--config", type=relative_path, help="explicit Vitest config relative to each checkout")

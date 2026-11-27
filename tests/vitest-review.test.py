@@ -1,5 +1,7 @@
 """Real Vitest 4 native review. Supply a local node_modules with VITEST_TEST_MODULES."""
+import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -138,6 +140,83 @@ test('reads the business golden', async () => { await expect(String(units([1, 3]
         self.set("after", "setup.mjs", "throw Error('private stack marker');")
         result = self.review(1)
         self.assertNotIn("private stack marker", result)
+
+    def test_competing_proposals_share_one_fresh_native_baseline(self):
+        weak = self.root / "weak"
+        shutil.copytree(self.root / "before", weak, symlinks=True)
+        self.set("weak", "units.test.mjs", TEST.replace("toBe(4)", "toBe(1)"))
+        calls = self.root / "captures.txt"
+        marker = ("import {appendFileSync} from 'node:fs'; appendFileSync(" +
+                  json.dumps(str(calls)) + ", process.cwd() + '\\n');")
+        for arm in ("before", "after", "weak"):
+            self.set(arm, "setup.mjs", marker)
+
+        def check(code, arms, expected_trees, *extra):
+            calls.write_text("")
+            options = [part for arm in arms for part in ("--after-root", str(self.root / arm))]
+            result = subprocess.run([sys.executable, str(CLI), "--before-root", str(self.root / "before"),
+                                     *options, "--implementation", "service.mjs", *extra, "units.test.mjs"],
+                                    capture_output=True, text=True, timeout=45)
+            text = result.stdout + result.stderr
+            self.assertEqual(result.returncode, code, text)
+            self.assertEqual([Path(p).name for p in calls.read_text().splitlines()], expected_trees, text)
+            self.assertNotIn("private-ticket", text)
+            return text
+
+        forward = check(100, ["after", "weak"], ["before", "after", "weak"])
+        self.assertIn('Proposal 1 "after": VERIFIED REPAIR', forward)
+        self.assertIn('Proposal 2 "weak": HOLD', forward)
+        self.assertIn('Implementation unchanged: "service.mjs"', forward)
+        self.assertNotIn("No implementation was identified", forward)
+        reverse = check(100, ["weak", "after"], ["before", "weak", "after"])
+        self.assertIn('Proposal 2 "after": VERIFIED REPAIR', reverse)
+        self.assertIn('Proposal 1 "weak": HOLD', reverse)
+        invalid = check(1, ["gone", "after", "before", "after", "weak"], ["before", "after", "weak"])
+        self.assertIn('Proposal 1 "gone": INVALID', invalid)
+        self.assertIn('Proposal 2 "after": VERIFIED REPAIR', invalid)
+        self.assertIn('Proposal 3 "before": INVALID', invalid)
+        self.assertIn('Proposal 4 "after": INVALID', invalid)
+        self.assertIn('Proposal 5 "weak": HOLD', invalid)
+
+        fixed = self.root / "also-fixed"
+        shutil.copytree(self.root / "after", fixed, symlinks=True)
+        all_green = check(0, ["also-fixed", "after"], ["before", "also-fixed", "after"])
+        self.assertIn('Proposal 1 "also-fixed": VERIFIED REPAIR', all_green)
+        self.assertIn('Proposal 2 "after": VERIFIED REPAIR', all_green)
+
+        # Both candidates must pass the newly requested held-out assertion; being
+        # the previously verified arm is no substitute for a fresh baseline.
+        for arm in ("before", "after", "weak"):
+            with (self.root / arm / "units.test.mjs").open("a") as test:
+                test.write("test('empty input', () => expect(units([])).toBe(0));\n")
+        self.set("after", "service.mjs", "export const units = a => a.length ? a.reduce((x,y)=>x+y) : 1;")
+        held = check(100, ["weak", "after"], ["before", "weak", "after"])
+        self.assertIn('Proposal 2 "after": HOLD', held)
+        self.assertIn("1/3 before, 2/3 after", held)
+
+    def test_unresolved_implementation_names_the_next_step(self):
+        result = subprocess.run([sys.executable, str(CLI), "--before-root", str(self.root / "before"),
+                                 "--after-root", str(self.root / "after"), "units.test.mjs"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 100)
+        self.assertIn("No implementation was identified. Use --implementation FILE", result.stdout)
+
+    def test_a_service_reached_in_only_one_run_cannot_verify_a_repair(self):
+        service_import = "import {units} from './service.mjs';"
+        for checkout, side in [("after", "baseline"), ("before", "candidate")]:
+            with self.subTest(side=side):
+                for arm in ("before", "after"):
+                    self.set(arm, "units.test.mjs", TEST)
+                    self.set(arm, "service.mjs", AFTER if checkout == "before" else BEFORE)
+                local = BEFORE if checkout == "before" else AFTER
+                self.set(checkout, "units.test.mjs", TEST.replace(service_import, local.removeprefix("export ")))
+                # The service remains on disk in both checkouts. Reaching it in
+                # just one does not establish which bytes the other suite tested.
+                report = self.review(100)
+                self.assertIn("1/2 before, 2/2 after", report)
+                self.assertIn(f'Implementation reached only in the {side}: "service.mjs"', report)
+                self.assertNotIn("Changed implementation:", report)
+                self.assertNotIn("Implementation unchanged:", report)
+                self.assertNotIn("stayed identical", report)
 
     def test_wrong_file_selection_and_already_green(self):
         self.assertIn("INVALID", self.review(1, label="../outside.test.mjs"))
