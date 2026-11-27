@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Review proposed repairs against a fresh baseline from the same trusted Vitest 4 tests."""
+"""Review a trusted Vitest 4 repair. For release decisions, use --replay-original-tests to score the original expectations."""
 import argparse
 from collections import Counter
 import hashlib
@@ -252,8 +252,11 @@ def review(args):
             decisions.append((label, status))
         if len(decisions) > 1:
             print("Release decision for the selected cases:")
-            for label, status in decisions:
-                print(f"  {label}: " + {0: "VERIFIED REPAIR", 100: "HOLD", 1: "INVALID"}[status])
+            for index, (label, status) in enumerate(decisions, 1):
+                verdict = {0: "VERIFIED REPAIR", 100: "HOLD", 1: "INVALID"}[status]
+                if index in unavailable:
+                    verdict = "ORIGINAL TESTS UNAVAILABLE (submitted: " + verdict + ")"
+                print(f"  {label}: " + verdict)
         statuses = [status for _, status in decisions]
         if any(status != 1 for status in statuses):
             if not args.show_names:
