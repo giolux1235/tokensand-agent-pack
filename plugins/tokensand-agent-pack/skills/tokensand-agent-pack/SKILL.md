@@ -1,11 +1,17 @@
 ---
 name: tokensand-agent-pack
-description: Check AI workflow changes, explain failing cases, find builder resources, and review projects for sharing.
+description: Check AI workflow changes, run shared Tokens& project examples, explain failing cases, find builder resources, and review projects for sharing.
 ---
 
 # Tokens& Agent Pack
 
 Use relevant existing context and continue authorized repository work; no additional approval step.
+
+## Run a shared project
+
+When a builder asks to run a shared `tokensand.com/p/…` example, open that page and follow **Repo** or read its `SoftwareSourceCode.codeRepository` field. **Check your own project** opens setup for the visitor’s app. If the page links a README or demo at a specific commit in the same repo, use that revision and its instructions for the published example. Otherwise use the default branch and record the checked-out commit.
+
+Work in a fresh checkout, separate from the builder’s app. Inspect the commands and code before executing a trusted local check. Prefer the project’s documented checks and fixtures, using its own stack. If it supplies a compatible workflow adapter, the bundled runner below can run it without installing a checker. Keep the run local and free of credentials. If the example needs a provider, account or missing source, report the prerequisite. Report the tested revision, case names and observed outcomes, including a rerun when the project supplies a repair.
 
 ## Check a workflow change
 

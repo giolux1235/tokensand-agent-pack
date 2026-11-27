@@ -43,6 +43,14 @@ For Claude Code, replace `--agent codex` with `--agent claude-code`. Open a new 
 
 Local checks run without an account, provider key or MCP connection. If you have no workflow tests, try the challenge below or run the [first local check](https://tokensand.com/agents/install#first-local-check).
 
+### Run a shared Tokens& project
+
+With the skill installed, give your coding agent the public `tokensand.com/p/…` link and ask:
+
+> Run this shared project’s example locally. Show me which cases fail and whether the documented repair passes.
+
+The agent follows the project’s **Repo** link and tests the edition linked from its page in a separate checkout. If the page has no pinned edition, it reports the revision it ran from the default branch. **Check your own project** starts setup for your own app.
+
 ### Review a release with a teammate
 
 Use the same pinned private Node SDK for both runs. The reviewer recognizes 0.7.7 and 0.7.8. From a clean candidate checkout, choose the earlier release tag and its saved run. Declare the app code in `sourceFiles`. If the scorer changed, the reviewer flags the saved result for review.
