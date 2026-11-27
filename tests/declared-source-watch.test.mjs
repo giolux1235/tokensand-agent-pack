@@ -24,7 +24,7 @@ test('installed watcher rescores file-based policy and scoring edits and ignores
     renameSync(file('saving.tmp'), file(name));
   };
   const env = {PATH: process.env.PATH, HOME: root, NO_COLOR: '1', NODE_DISABLE_COLORS: '1'};
-  const archive = fileURLToPath(new URL('../packages/tokensand-workflow-check-0.1.29.tgz', import.meta.url));
+  const archive = fileURLToPath(new URL('../packages/tokensand-workflow-check-0.1.30.tgz', import.meta.url));
   execFileSync('tar', ['-xzf', archive, '-C', root]);
   write('package.json', '{}');
   write('policy.txt', 'confirm');
