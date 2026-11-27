@@ -5,6 +5,7 @@ from collections import Counter
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -79,6 +80,8 @@ def capture(root, args, directory):
         issues.append("A selected file contributed no named cases.")
     if run.returncode != int(any_failed):
         issues.append("Vitest exited inconsistently with the named cases or reported a suite or worker error.")
+    if data["unbound"]:
+        issues.append("An import or file snapshot could not be bound to this checkout.")
     if data["nonordinary"]:
         issues.append("Vitest reported an expected failure, exclusive or retried case, or a custom snapshot handler.")
     for key, digest in data["controls"].items():
@@ -88,7 +91,8 @@ def capture(root, args, directory):
         controls[path] = digest
     if any(source_sha(root, path) != digest for path, digest in controls.items()):
         issues.append("An evaluation input changed during execution.")
-    return cases, controls, issues, version, run.returncode
+    protected = {*declared, *map(Path, LOCKS), *map(relative_path, data["protectedFiles"])}
+    return cases, controls, protected, issues, version, run.returncode
 
 
 def review(args):
@@ -101,24 +105,43 @@ def review(args):
             directory = Path(work) / name
             directory.mkdir(mode=0o700)
             runs.append(capture(root, args, directory))
-    (before, old, first, v1, e1), (after, new, last, v2, e2) = runs
+    (before, old, baseline_controls, first, v1, e1), (after, new, candidate_controls, last, v2, e2) = runs
     issues = list(dict.fromkeys(first + last))
     if v1 != v2:
         issues.append("The installed Vitest versions differ.")
-    if old.keys() != new.keys():
-        issues.append("The two runs loaded different control files.")
-    sources = [(path, old.get(path), new.get(path), True) for path in sorted(old.keys() | new.keys())]
+    protected = baseline_controls | candidate_controls
+    loaded = old.keys() | new.keys()
+    implementation = set(args.implementation)
+    if not implementation:
+        # The adjacent module with the same name as a .test or .spec file is
+        # the common Vitest layout. All other changed local imports need a role.
+        for target in args.files:
+            name = re.sub(r"\.(test|spec)\.[^.]+$", "", target.name)
+            adjacent = {path for path in loaded - protected
+                        if path.parent == target.parent and path.stem == name}
+            if len(adjacent) == 1:
+                implementation.update(adjacent)
+    if implementation & protected or implementation - loaded:
+        raise Invalid("implementation files must be reached local modules, separate from tests and controls")
+    changed_impl = {path for path in implementation if old.get(path) != new.get(path)}
+    if not changed_impl:
+        issues.append("No changed implementation was identified. Use --implementation FILE for the intended service module.")
+    if (old.keys() ^ new.keys()) - implementation:
+        issues.append("The runs loaded different tests, controls or undeclared local imports.")
+    sources = [(path, old.get(path), new.get(path), True) for path in sorted(loaded - implementation)]
     _, comparable, eligible = review_status(before, after, sources, issues)
     recovered = {key for key in before.keys() & after.keys() if before[key] == "failed" and after[key] == "passed"}
     verified = eligible and bool(recovered)
     print(("VERIFIED REPAIR" if verified else "HOLD") + " — selected local Vitest cases")
-    print(f"Ordinary passes: {list(before.values()).count('passed')}/{len(before)} before, "
+    print(f"Vitest-reported passes: {list(before.values()).count('passed')}/{len(before)} before, "
           f"{list(after.values()).count('passed')}/{len(after)} after. Vitest exits: {e1}, {e2}.")
+    for path in sorted(changed_impl):
+        print("Changed implementation: " + json.dumps(path.as_posix(), ensure_ascii=True))
     for issue in issues:
         print(issue)
     for path, lhs, rhs, _ in sources:
         if lhs != rhs:
-            print("Changed test or control: " + json.dumps(path.as_posix(), ensure_ascii=True))
+            print("Changed test, control or local import: " + json.dumps(path.as_posix(), ensure_ascii=True))
     if before.keys() != after.keys():
         print("The named test roster changed.")
     if not recovered:
@@ -133,7 +156,7 @@ def review(args):
         print(f"{label}: {was} -> {now}" + (" (recovered)" if comparable and key in recovered else ""))
     if not args.show_names:
         print("Use --show-names locally to display the test file and full case name.")
-    print("Scope: selected tests, active config/setup and standard snapshots. Declare imported helpers and data with --test-source.")
+    print("Scope: selected tests, reached local modules, active settings and bound snapshots. Declare files read outside the module graph with --test-source.")
     return 0 if verified else 100
 
 
@@ -141,6 +164,8 @@ if __name__ == "__main__":
     parser = Arguments(description=__doc__)
     parser.add_argument("--before-root", required=True, type=Path)
     parser.add_argument("--after-root", default=Path.cwd(), type=Path)
+    parser.add_argument("--implementation", type=relative_path, action="append", default=[], metavar="FILE",
+                        help="changed service module; the adjacent same-named module is recognized automatically")
     parser.add_argument("--config", type=relative_path, help="explicit Vitest config relative to each checkout")
     parser.add_argument("--test-source", type=relative_path, action="append", default=[], metavar="FILE")
     parser.add_argument("--show-names", action="store_true", help="print local testcase names; these can contain private fixture values")

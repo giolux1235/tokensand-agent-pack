@@ -36,7 +36,7 @@ class NativeReview(unittest.TestCase):
 
     def review(self, code, *extra, label="units.test.mjs"):
         result = subprocess.run([sys.executable, str(CLI), "--before-root", str(self.root / "before"),
-                                 "--after-root", str(self.root / "after"), *extra, label],
+                                 "--after-root", str(self.root / "after"), "--implementation", "service.mjs", *extra, label],
                                 capture_output=True, text=True, timeout=45)
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, code, output)
@@ -74,7 +74,7 @@ class NativeReview(unittest.TestCase):
         self.assertIn("units.test.mjs:4:", outcome)
         self.set("after", "service.mjs", BEFORE)
         self.set("after", "units.test.mjs", same.replace("toBe(4)", "toBe(1)"))
-        self.assertIn("Changed test or control", self.review(100))
+        self.assertIn("Changed test, control or local import", self.review(100))
 
     def test_inputs_and_declared_data(self):
         for source in ("setup.mjs", "vitest.config.mjs"):
@@ -85,6 +85,41 @@ class NativeReview(unittest.TestCase):
         for arm, data in [("before", "4"), ("after", "1")]:
             self.set(arm, "expected.json", data)
         self.assertIn("expected.json", self.review(100, "--test-source", "expected.json"))
+
+    def test_imported_oracle_drift_even_when_service_also_changed(self):
+        for arm, value in (("before", 4), ("after", 1)):
+            self.set(arm, "units.test.mjs", "import {gold} from './expected.mjs';\n" + TEST.replace("toBe(4)", "toBe(gold)"))
+            self.set(arm, "expected.mjs", f"export const gold = {value};")
+        self.set("after", "service.mjs", BEFORE + "\n// code changed, same broken behavior")
+        self.assertIn("expected.mjs", self.review(100))
+
+    def test_setup_and_global_setup_imports_are_controls(self):
+        local_test = TEST.replace("toBe(4)", "toBe(globalThis.expected)")
+        for arm, value in (("before", 4), ("after", 1)):
+            self.set(arm, "units.test.mjs", local_test)
+            self.set(arm, "setup.mjs", "import {gold} from './expected.mjs'; globalThis.expected = gold;")
+            self.set(arm, "expected.mjs", f"export const gold = {value};")
+        self.set("after", "service.mjs", BEFORE + "\n// still discards second unit")
+        self.assertIn("expected.mjs", self.review(100))
+        for arm, value in (("before", 4), ("after", 1)):
+            self.set(arm, "vitest.config.mjs", "export default {test:{globalSetup:['./bootstrap.mjs']}}")
+            self.set(arm, "bootstrap.mjs", "import {gold} from './expected.mjs'; export default p => { p.provide('gold', gold) }")
+            self.set(arm, "units.test.mjs", "import {inject} from 'vitest';\n" + TEST.replace("toBe(4)", "toBe(inject('gold'))"))
+        self.assertIn("expected.mjs", self.review(100))
+
+    def test_literal_file_snapshot_and_unbound_dynamic_path(self):
+        test = """import { test, expect } from 'vitest'; import { units } from './service.mjs';
+test('reads the business golden', async () => { await expect(String(units([1, 3]))).toMatchFileSnapshot('./summary.txt'); });"""
+        for arm, value in (("before", "4"), ("after", "1")):
+            self.set(arm, "units.test.mjs", test)
+            self.set(arm, "summary.txt", value)
+        self.set("after", "service.mjs", BEFORE + "\n// same broken behavior")
+        self.assertIn("summary.txt", self.review(100))
+        for arm in ("before", "after"):
+            self.set(arm, "summary.txt", "4")
+            self.set(arm, "units.test.mjs", "const path = './summary.txt';\n" + test.replace("Snapshot('./summary.txt')", "Snapshot(path)"))
+        self.set("after", "service.mjs", AFTER)
+        self.assertIn("could not be bound", self.review(100))
 
     def test_snapshot_selection_and_empty_scope(self):
         for arm in ("before", "after"):
