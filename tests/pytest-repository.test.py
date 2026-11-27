@@ -13,7 +13,7 @@ import unittest
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-WHEEL = ROOT / "packages/tokensand_pytest_checks-0.1.0-py3-none-any.whl"
+WHEEL = ROOT / "packages/tokensand_pytest_checks-0.1.1-py3-none-any.whl"
 CAPTURE = ROOT / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/scripts/capture_pytest.py"
 PROJECT, EPOCH = str(uuid.uuid4()), str(uuid.uuid4())
 ENDPOINT = "/api/observability/v1/repository-checks"

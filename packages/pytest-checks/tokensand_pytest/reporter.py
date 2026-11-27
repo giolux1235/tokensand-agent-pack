@@ -4,13 +4,40 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import ssl
 import subprocess
+import sys
 import time
 from urllib import error, parse, request
 import uuid
 
 WEEK = 7 * 86400
 MAX_PENDING = 256
+_MACOS_CA_FILE = Path("/etc/ssl/cert.pem")
+TLS_ERROR = "TLS certificate verification failed. Check the endpoint hostname and this Python environment's trusted CA certificates."
+
+
+class CertificateTrustError(Exception):
+    """A TLS certificate could not be verified using the configured trust store."""
+
+
+def _macos_tls_context():
+    if sys.platform != "darwin" or "SSL_CERT_FILE" in os.environ or "SSL_CERT_DIR" in os.environ:
+        return None
+    defaults = ssl.get_default_verify_paths()
+    if defaults.cafile is not None or defaults.capath is not None or not _MACOS_CA_FILE.is_file():
+        return None
+    # Some standalone macOS Python builds have neither an OpenSSL store nor loaded roots.
+    context = ssl.create_default_context()
+    if context.cert_store_stats()["x509_ca"]:
+        return None
+    try:
+        context.load_verify_locations(cafile=str(_MACOS_CA_FILE))
+    except (OSError, ssl.SSLError):
+        raise CertificateTrustError(TLS_ERROR) from None
+    if ssl.HAS_ALPN:
+        context.set_alpn_protocols(["http/1.1"])
+    return context
 
 
 def _uuid(value):
@@ -66,7 +93,17 @@ def _call(url, payload=None):
         raise ValueError("Set the ingestion key for this private app.")
     data = None if payload is None else json.dumps(payload).encode()
     req = request.Request(url, data=data, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
-    with request.build_opener(_NoRedirect()).open(req, timeout=3) as response:
+    handlers = [_NoRedirect()]
+    context = _macos_tls_context() if req.type == "https" else None
+    if context is not None:
+        handlers.append(request.HTTPSHandler(context=context))
+    try:
+        response = request.build_opener(*handlers).open(req, timeout=3)
+    except error.URLError as exc:
+        if isinstance(exc.reason, ssl.SSLCertVerificationError):
+            raise CertificateTrustError(TLS_ERROR) from None
+        raise
+    with response:
         raw = response.read(4097)
         if len(raw) > 4096 or response.headers.get_content_type() != "application/json":
             raise ValueError("Invalid response from private app.")
@@ -152,6 +189,8 @@ def _work(action, scores=None, run_id=None, *, checkout=None, grant=None):
                         try:
                             if _deliver(db, binding, oldest) != "delivered":
                                 return "queue full"
+                        except CertificateTrustError:
+                            return "queue full; " + TLS_ERROR
                         except (OSError, HTTPException, ValueError):
                             return "queue full"
                     db.execute("INSERT OR IGNORE INTO pending VALUES(?,?,?,?)", fresh)
@@ -169,6 +208,8 @@ def _work(action, scores=None, run_id=None, *, checkout=None, grant=None):
                     outcome = _deliver(db, binding, row)
                     if outcome != "delivered":
                         return outcome
+            except CertificateTrustError:
+                return ("queued; " if binding[3] else "") + TLS_ERROR
             except error.HTTPError as exc:
                 if exc.code in (401, 403, 404):
                     return "check app connection"

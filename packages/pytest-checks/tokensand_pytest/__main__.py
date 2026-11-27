@@ -30,6 +30,9 @@ def main(argv=None):
             result = connection.connect(args.project, args.test_file, args.queue_offline)
         else:
             result = reporter._work(args.command)
+    except reporter.CertificateTrustError:
+        print(reporter.TLS_ERROR, file=sys.stderr)
+        return 1
     except (OSError, HTTPException, RuntimeError, sqlite3.Error, ValueError, KeyError):
         print("Check the test path, private app ID, repository reporting setting, endpoint and ingestion key. "
               "For a different app or test file, disconnect the previous checkout connection first.", file=sys.stderr)
