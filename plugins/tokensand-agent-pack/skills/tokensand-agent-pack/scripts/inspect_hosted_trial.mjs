@@ -100,9 +100,9 @@ function toolMeasurement(arm, name) {
   if (arm.status !== "ok") return { unavailable: arm.status };
   if (!arm.complete) return { unavailable: "incomplete telemetry" };
   if (arm.tools.length === 32) return { unavailable: "span limit reached" };
+  if (arm.tools.some(s => s.status === "interrupted")) return { unavailable: "interrupted tool timing" };
   const calls = arm.tools.filter(s => s.name === name);
   if (!calls.length) return { unavailable: "tool not recorded" };
-  if (calls.some(s => s.status !== "ok")) return { unavailable: "unfinished or failed tool call" };
 
   let end = 0, active = 0;
   for (const span of calls.sort((a, b) => a.startMs - b.startMs)) {
@@ -110,7 +110,7 @@ function toolMeasurement(arm, name) {
     active += Math.max(0, next - Math.max(end, span.startMs));
     end = Math.max(end, next);
   }
-  return { activeMs: Number(active.toFixed(6)), calls: calls.length };
+  return { activeMs: Number(active.toFixed(6)), calls: calls.length, failedCalls: calls.filter(s => s.status === "error").length };
 }
 
 function summarizeTool(pairs, name, minDeltaMs) {
@@ -123,7 +123,8 @@ function summarizeTool(pairs, name, minDeltaMs) {
   });
   const comparable = trials.filter(t => t.deltaMs !== null);
   return { tool: name, minDeltaMs, plannedTrials: pairs.length, comparableTrials: comparable.length,
-    slowerTrialIds: comparable.filter(t => t.deltaMs > minDeltaMs).map(t => t.trial), trials };
+    slowerTrialIds: comparable.filter(t => t.deltaMs > minDeltaMs).map(t => t.trial),
+    fasterTrialIds: comparable.filter(t => t.deltaMs < -minDeltaMs).map(t => t.trial), trials };
 }
 
 async function inspect(directory, opts) {
