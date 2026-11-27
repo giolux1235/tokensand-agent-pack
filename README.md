@@ -99,7 +99,7 @@ Save the checker for your language in your repository. Run it with your own trus
 | Download | Command |
 | --- | --- |
 | [Node.js checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.19/tokensand-first.test.mjs) | `node tokensand-first.test.mjs --offline-workflow ./observe.workflow.mjs` |
-| [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.9/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
+| [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.10/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
 
 Set `repetitions` to an integer from 1 to 10 to run every case that many times. Omit it to run each case once. Append `--case ID_A --case ID_B` to repeat only those cases, at least three times each. An ordinary local check exits `0` when its checks pass and `1` on a failed or unscored check. An invalid case selection or repetition count exits `2`. For expected and actual values, select one case with `--case CASE_ID --inspect-values` and open the private file it prints. Delete it after debugging.
 
@@ -124,7 +124,7 @@ For Claude Code, use `.claude/skills` in the same command. You can also [downloa
 In your project’s virtual environment, install the checker and run your trusted local workflow:
 
 ```sh
-python3 -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.9/tokensand_workflow_check-0.1.9-py3-none-any.whl
+python3 -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.10/tokensand_workflow_check-0.1.10-py3-none-any.whl
 python3 -m tokensand_check --offline-workflow ./my_workflow.py
 ```
 
@@ -132,7 +132,7 @@ If you edited `test_tokensand_first.py`, run `python3 -m tokensand_check --offli
 
 For an async agent, import `asyncio` and return `asyncio.run(agent.ainvoke(item))` from `candidate(item, ctx=None)`. The optional second argument accepts the context passed by the private SDK’s workflow worker. Collect streamed replies before scoring them.
 
-Try the [SQLite sync example](examples/incremental-sync.py) as `my_workflow.py`. The initial read passes. Resuming a page drops a record when two timestamps match. Rerun with `FIX_CURSOR=1` to verify the repair. The summary shows how many trials failed and how many lacked a required score. An affected trial can appear in both counts.
+Try the [SQLite sync example](examples/incremental-sync.py) as `my_workflow.py`. The initial read passes. Resuming a page drops a record when two timestamps match. Rerun with `FIX_CURSOR=1` to verify the repair. Repeated runs show each affected case and check with its trial counts. Add `--verbose` for the individual trial reports. Give an annotation prerequisite its own named check when the reviewer needs to distinguish a missing label from other unscored results. The summary shows how many trials failed and how many lacked a required score. An affected trial can appear in both counts.
 
 ### Check a Lovable project
 

@@ -51,7 +51,7 @@ class PythonRelease(unittest.TestCase):
             self.assertEqual(source.count(marker), 1)
             edited.write_text(source.replace(marker, adapter + marker))
             original = edited.read_bytes()
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.9-py3-none-any.whl") as current:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.10-py3-none-any.whl") as current:
                 current.extractall(project / "wheel")
             for guide, command in documented:
                 with self.subTest(guide=guide.name):
@@ -64,7 +64,7 @@ class PythonRelease(unittest.TestCase):
                     self.assertEqual(edited.read_bytes(), original)
 
     def test_shipped_runner(self):
-        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.9-py3-none-any.whl") as wheel:
+        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.10-py3-none-any.whl") as wheel:
             self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
         for repair, outage, code, message in [
             ("0", "0", 1, "Failed checks: Return every remaining record"),
@@ -92,6 +92,48 @@ class PythonRelease(unittest.TestCase):
                 self.assertEqual(run.returncode, 1, run.stderr)
                 self.assertIn("Ran 6 tests", run.stderr)
                 self.assertIn("failures=3", run.stderr)
+
+    def test_repeated_scores_group_by_case_and_check_without_hiding_runtime_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = Path(tmp) / "mixed.py"
+            adapter.write_text("""
+from collections import Counter
+calls = Counter()
+def target(case):
+    calls[case] += 1
+    if case == "mixed" and calls[case] == 3:
+        raise ValueError("application error")
+    return "PRIVATE_OUTPUT"
+def unavailable():
+    raise ValueError("PRIVATE_SCORER_REASON")
+def evaluate(case, output, variant):
+    if case == "mixed" and calls[case] == 2:
+        return {"left": unavailable, "right": True}
+    return {"left": False, "right": None}
+workflow = dict(repetitions=3, cases=[{"id": c, "input": c} for c in ("mixed", "steady")],
+                candidate=target, evaluate=evaluate,
+                checks=[{"id": c, "label": "Span"} for c in ("left", "right")])
+""")
+            command = [sys.executable, "-I", "-B", SCRIPT, "--offline-workflow", adapter]
+            grouped = subprocess.run(command, capture_output=True, text=True)
+            verbose = subprocess.run([*command, "--verbose"], capture_output=True, text=True)
+            for run in (grouped, verbose):
+                self.assertEqual(run.returncode, 1)
+                self.assertEqual(run.stdout, "")
+                self.assertIn("ValueError: application error", run.stderr)
+                self.assertNotIn("PRIVATE_", run.stderr)
+                self.assertIn("Trials with failed or unscored checks: 5 of 6", run.stderr)
+            expected = [
+                "mixed — Span [left]: failed 1/3 (trials 1), unscored 1/3 (trials 2)",
+                "mixed (trial 1/3) — Span [right]: unscored 1/3",
+                "steady — Span [left]: failed 3/3",
+                "steady — Span [right]: unscored 3/3",
+            ]
+            self.assertEqual([line for line in grouped.stderr.splitlines() if " — " in line], expected)
+            self.assertEqual(grouped.stderr.count("Traceback "), 1)
+            self.assertIn("mixed (trial 3/3)", grouped.stderr)
+            self.assertEqual(verbose.stderr.count("Traceback "), 6)
+            self.assertNotIn(" — ", verbose.stderr)
 
     def test_repetitions_isolate_a_consumed_grader_input(self):
         import runpy

@@ -28,6 +28,8 @@ The skill bundles two local runners. Resolve `SKILL_DIR` to the directory contai
 - Node default export: `node SKILL_DIR/scripts/check_workflow.mjs --offline-workflow ./observe.workflow.mjs`.
 - Python workflow dictionary: `python3 SKILL_DIR/scripts/check_workflow.py --offline-workflow ./my_workflow.py`. If the adapter returns an unfinished async operation, await the agent call or collect its stream inside the adapter and rerun the original cases.
 
+Read repeated Python scores by case and check. Use `--verbose` for individual trial reports. An unscored check needs investigation. Use a separately named prerequisite check to substantiate a missing annotation.
+
 If the service has an edited `test_tokensand_first.py`, keep its cases. After a skill upgrade, set `SKILL_DIR` to this skill’s directory and run `python3 "$SKILL_DIR/scripts/check_workflow.py" --offline-workflow ./test_tokensand_first.py` to use the installed runner.
 
 Run the service’s own interpreter with one trusted adapter. A full check runs each case for the workflow’s declared `repetitions` (1–10), or once if omitted. To run selected cases, pass each exact ID as one argument, `--case=ID`. Quote that argument in a shell when the ID contains spaces or punctuation. Each runs at least three times. For private values or Node tool timings, select exactly one case and add `--inspect-values` or `--inspect-tools`. A failed or unscored local check exits 1 and an invalid selection or repetition count exits 2. Rerun the full suite after the repair. An existing Node repo test can run with `node test/tokensand-workflow.test.mjs`. Local checks need no first Git commit, account, SDK or MCP connection.
