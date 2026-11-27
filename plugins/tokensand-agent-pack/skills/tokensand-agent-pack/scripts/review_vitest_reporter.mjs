@@ -12,6 +12,7 @@ export default class ReviewReporter {
     this.controls = Object.create(null);
     this.nonordinary = false;
     this.unbound = false;
+    this.childProcess = false;
   }
 
   control(file) {
@@ -87,6 +88,7 @@ export default class ReviewReporter {
       // calls the matcher. A dynamic expression cannot be bound by inspection.
       if (/\.[cm]?[jt]sx?$/.test(file)) {
         const source = readFileSync(file, "utf8");
+        if (/["'`](?:node:)?child_process["'`]/.test(source)) this.childProcess = true;
         for (const match of source.matchAll(/\btoMatchFileSnapshot\b/g)) {
           const expression = source.slice(match.index + match[0].length);
           const literal = /^\s*\(\s*(['"`])([^'"`\\\r\n]+)\1\s*[,)]/.exec(expression);
@@ -116,7 +118,7 @@ export default class ReviewReporter {
     }
     writeFileSync(process.env.TOKENSAND_VITEST_RECEIPT, JSON.stringify({
       cases, modules: this.modules, controls: this.controls, protectedFiles: [...protectedFiles],
-      nonordinary: this.nonordinary, unbound: this.unbound, unscored
+      nonordinary: this.nonordinary, unbound: this.unbound, childProcess: this.childProcess, unscored
     }), { mode: 0o600, flag: "wx" });
   }
 }

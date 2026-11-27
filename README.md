@@ -270,7 +270,7 @@ In project chat, ask:
 
 To include a Tokens& check in future full frontend test runs, ask **“Run my Tokens& workflow with the app’s frontend tests.”** Keep the generated test, its reporter, `observe.workflow.mjs` and the updated package files with the app. Requires Vitest 3.2+ with a Node worker. Local checks need no Tokens& account or ingestion key. [Frontend testing in Lovable](https://docs.lovable.dev/features/testing#frontend-tests)
 
-The native test shows failing case IDs locally and aggregate counts in CI. It skips GitHub pull requests. For PR coverage, use the [isolated GitHub workflow](#review-a-pull-request).
+For a release decision, include your workflow and any separate synthetic scoring fixtures as `--test-source` inputs to the [Vitest repair review](#review-an-existing-vitest-test). The native test shows failing case IDs locally and aggregate counts in CI. It skips GitHub pull requests. For PR coverage, use the [isolated GitHub workflow](#review-a-pull-request).
 
 In a [GitHub-synced checkout](https://docs.lovable.dev/integrations/github), Codex or Claude Code can also run the workflow from the app directory:
 

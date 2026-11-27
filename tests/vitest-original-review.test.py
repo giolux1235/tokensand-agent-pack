@@ -57,6 +57,51 @@ class OriginalReview(unittest.TestCase):
         self.assertEqual(result.returncode, status, output)
         return output
 
+    def test_child_process_cannot_verify_a_weaker_external_scorer(self):
+        helper = """import {execFileSync} from 'node:child_process';
+export const matches = n => execFileSync(process.execPath, ['scorer.mjs', String(n)], {encoding:'utf8'}).trim() === 'yes';"""
+        test = """import {expect,test} from 'vitest'; import {route} from './route.mjs'; import {matches} from './helper.mjs';
+test('accepts the last result', () => expect(matches(route([2,8]))).toBe(true));"""
+        original = "console.log(Number(process.argv[2]) === 8 ? 'yes' : 'no');"
+        for root in (self.base, self.after, self.peer):
+            (root / "helper.mjs").write_text(helper)
+            (root / "route.test.mjs").write_text(test)
+            (root / "scorer.mjs").write_text("console.log('yes');" if root == self.after else original)
+            self.git(root, "add", "helper.mjs", "scorer.mjs")
+        (self.after / "route.mjs").write_text(BAD + "// same result after refactor")
+        plain = self.review(1, "--implementation", "route.mjs", replay=False, pair=True)
+        self.assertIn('Proposal 1 "proposed": ORIGINAL TESTS UNAVAILABLE (submitted: HOLD)', plain)
+        self.assertIn('Proposal 2 "other": VERIFIED REPAIR', plain)
+        bound = self.review(100, "--implementation", "route.mjs", "--test-source", "scorer.mjs",
+                            replay=False, pair=True)
+        self.assertIn("Original tests (replayed): 0/1 passed, 1 failed.", bound)
+        self.assertIn('Proposal 1 "proposed": HOLD', bound)
+        self.assertIn('Proposal 2 "other": VERIFIED REPAIR', bound)
+
+        (self.base / ".env").write_text("synthetic-private-marker")
+        self.git(self.base, "add", ".env")
+        private = self.review(1, "--implementation", "route.mjs", replay=False, pair=True)
+        self.assertNotIn("VERIFIED REPAIR", private)
+        self.assertNotIn("synthetic-private-marker", private)
+
+    def test_child_process_introduced_in_candidate_requires_the_original_inputs(self):
+        (self.after / "route.test.mjs").write_text(TEST)
+        for root in (self.base, self.after, self.peer):
+            (root / "child.mjs").write_text("console.log(JSON.parse(process.argv[2]).at(-1));")
+            self.git(root, "add", "child.mjs")
+        with (self.peer / "child.mjs").open("a") as child:
+            child.write("// changed subprocess input")
+        (self.after / "route.mjs").write_text(GOOD)
+        with (self.after / "child.mjs").open("a") as child:
+            child.write("// previously unobserved changed file")
+        (self.peer / "route.mjs").write_text("""import {execFileSync} from 'node:child_process';
+export const route = a => Number(execFileSync(process.execPath, ['child.mjs', JSON.stringify(a)]));""")
+        report = self.review(1, replay=False, pair=True)
+        self.assertIn("Checking the original tracked inputs", report)
+        self.assertIn("HOLD", report)
+        self.assertNotIn("VERIFIED REPAIR", report)
+        self.assertEqual(report.count('Proposal 1 "proposed"\n'), 1)
+
     def test_one_command_replays_real_native_assertions_without_touching_the_candidates(self):
         def evidence():
             return {str(f):hashlib.sha256(f.read_bytes()).hexdigest() for arm in (self.base, self.after, self.peer)

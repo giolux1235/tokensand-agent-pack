@@ -4,6 +4,7 @@ import argparse
 from collections import Counter
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
+from copy import copy
 import hashlib
 from io import StringIO
 import json
@@ -28,6 +29,10 @@ def relative_path(value):
     if path.is_absolute() or ".." in path.parts or not path.parts or path.parts[0].startswith("-"):
         raise argparse.ArgumentTypeError("provide a checkout-relative file")
     return path
+
+
+class NeedsOriginalReview(Exception):
+    """A child process can load code and expectations outside Vite's import graph."""
 
 
 def capture(root, args, directory):
@@ -67,6 +72,9 @@ def capture(root, args, directory):
     wanted = sorted(str(path) for path in args.files)
     if sorted(data["modules"]) != wanted:
         raise Invalid("Vitest collected a different set of files; select exact test files in one project")
+    child_process = data["childProcess"]
+    if child_process and not args.replay_original_tests:
+        raise NeedsOriginalReview
     if data["unscored"]:
         raise Invalid("Vitest reported a suite or worker error; inspect the checkout’s native run")
     rows = read_report(xml, vitest_rows=True)
@@ -101,7 +109,7 @@ def capture(root, args, directory):
     if any(source_sha(root, path) != digest for path, digest in controls.items()):
         issues.append("An evaluation input changed during execution.")
     protected = {*declared, *map(Path, LOCKS), *map(relative_path, data["protectedFiles"])}
-    return cases, controls, protected, issues, version, run.returncode
+    return cases, controls, protected, issues, version, run.returncode, child_process
 
 
 def implementation_files(args, loaded, protected):
@@ -165,8 +173,8 @@ class ReviewRow:
 
 
 def compare(args, earlier, later, extra_issues=(), row=None):
-    before, old, baseline_controls, first, v1, e1 = earlier
-    after, new, candidate_controls, last, v2, e2 = later
+    before, old, baseline_controls, first, v1, e1, _ = earlier
+    after, new, candidate_controls, last, v2, e2, _ = later
     issues = list(dict.fromkeys([*first, *last, *extra_issues]))
     if v1 != v2:
         issues.append("The installed Vitest versions differ.")
@@ -238,6 +246,27 @@ def compare(args, earlier, later, extra_issues=(), row=None):
 
 
 def review(args, note=None):
+    if args.replay_original_tests:
+        return review_checkouts(args, note)
+    # A later proposal can reveal a child process. Publish only one set of decisions.
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as output, tempfile.TemporaryFile(mode="w+", encoding="utf-8") as errors:
+        try:
+            with redirect_stdout(output), redirect_stderr(errors):
+                status = review_checkouts(args, note)
+        except NeedsOriginalReview:
+            pass
+        else:
+            for stream, destination in ((output, sys.stdout), (errors, sys.stderr)):
+                stream.seek(0)
+                shutil.copyfileobj(stream, destination)
+            return status
+    guarded = copy(args)
+    guarded.replay_original_tests = True
+    print("The selected tests use a child process. Checking the original tracked inputs.")
+    return review_checkouts(guarded, note)
+
+
+def review_checkouts(args, note):
     before = args.before_root.resolve(strict=True)
     proposals = args.after_root or [Path.cwd()]
     if len(set(args.files)) != len(args.files):
@@ -301,6 +330,8 @@ def review(args, note=None):
                     known = implementation | set(args.files) | set(args.test_source)
                     if tracked_changes(before_tree, candidate_tree) - known:
                         extra.append(UNKNOWN_INPUT)
+                elif earlier[6] or later[6]:
+                    extra.append("The subprocess inputs could not be bound to both original checkouts.")
                 print("Submitted tests")
                 status = compare(args, earlier, later, extra, row)
                 try:
