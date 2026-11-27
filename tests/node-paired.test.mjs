@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -81,4 +81,28 @@ test('a hard-blocked callback cannot turn into a fake pass, and a worker error d
   assert.equal(crash.code,2,crash.text);assert.doesNotMatch(crash.text,/Passed both:/);
   const fault=run(t,`candidate:()=>{process.exitCode=1;return true},evaluate:()=>({stock:true,missing:true})`,['--compare-baseline']);
   assert.equal(fault.code,2,fault.text);
+});
+
+test('binds declared imported criteria for both arms, including initialization and final trial',t=>{
+  const cwd=mkdtempSync(join(tmpdir(),'paired-scorer-'));
+  t.after(()=>rmSync(cwd,{force:true,recursive:true}));
+  mkdirSync(join(cwd,'rules'));
+  const adapter=join(cwd,'workflow.mjs'), rule=join(cwd,'rules','expected.mjs');
+  const outside=join(cwd,'external');symlinkSync(tmpdir(),outside);
+  for (const kind of ['stable','baseline write','candidate write','load write','missing','escape']) {
+    writeFileSync(rule,'export const expected=5;');
+    const change="writeFileSync(new URL('./rules/expected.mjs',import.meta.url),'export const expected=10;');";
+    const declared=kind==='missing'?'./absent.mjs':kind==='escape'?'./external':'./rules/expected.mjs';
+    writeFileSync(adapter,`import {writeFileSync} from 'node:fs';
+import {expected} from './rules/expected.mjs';
+${kind==='load write'?change:''}
+export default {maxCallsPerRun:{baseline:0,candidate:0},evaluatorSourceFiles:[${JSON.stringify(declared)}],
+  checks:[{id:'amount'}],cases:[{id:'receipt',input:10}],
+  baseline:x=>{${kind==='baseline write'?change:''}return x},candidate:x=>{${kind==='candidate write'?change:''}return x},
+  evaluate:({output})=>({amount:output===expected})};`);
+    const child=spawnSync(process.execPath,[runner,'--offline-workflow','workflow.mjs','--compare-baseline','--case','receipt'],{cwd,encoding:'utf8'});
+    assert.equal(child.status,kind==='stable'?1:2,kind+' '+child.stdout+child.stderr);
+    if (kind==='stable') assert.match(child.stdout,/Existing failure: "receipt" \/ "amount"/);
+    else {assert.match(child.stderr,/evaluator files/i);assert.doesNotMatch(child.stdout+child.stderr,/expected=10|Recovered:|Passed both:/);}
+  }
 });

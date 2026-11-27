@@ -192,11 +192,13 @@ node "$(git rev-parse --show-toplevel)/.agents/skills/tokensand-agent-pack/scrip
 
 For Claude Code, use `.claude/skills` in the same command. You can also [download the standalone reviewer](https://github.com/giolux1235/tokensand-agent-pack/releases/download/repair-review-1.0.0/review-repair-v1.mjs) once and use that file from any service. Use two saved offline Node SDK runs with Git revisions, declared scorer files and the same case. Install the service’s pinned SDK and the earlier checkout’s dependencies first. Exit `0` confirms the selected repair under the recorded checks, `100` holds it, and `1` means setup or evidence needs attention.
 
-With the installed Agent Pack, compare two zero-budget callbacks using the same scorer in fresh Node processes. From the service directory:
+To compare both declared zero-budget callbacks, save the paired Node checker as `tokensand-first.test.mjs` in your service, then run:
 
 ```sh
-node "$HOME/.agents/skills/tokensand-agent-pack/scripts/check_workflow.mjs" --offline-workflow ./observe.workflow.mjs --compare-baseline --case CASE_ID
+node ./tokensand-first.test.mjs --offline-workflow ./observe.workflow.mjs --compare-baseline --case CASE_ID
 ```
+
+With a project-local Agent Pack install, use `.agents/skills/tokensand-agent-pack/scripts/check_workflow.mjs` for Codex or `.claude/skills/tokensand-agent-pack/scripts/check_workflow.mjs` for Claude Code in the same command. List imported scorers and scoring data in `evaluatorSourceFiles`, relative to the adapter. Only declared files are checked for changes.
 
 The result names each recovered, new, existing or unscored check and its trials. A missing score or a candidate failure exits 1. Invalid setup or different fixtures exit 2. Set `timeoutMs` on your adapter, or paired runs use a 30-second deadline per trial. This check runs local, trusted code.
 
