@@ -25,7 +25,7 @@ jobs:
           temp=$(mktemp -d "$RUNNER_TEMP/tokensand-starter.XXXXXX")
           trap 'rm -rf -- "$temp"' EXIT
           if ! curl --fail --silent --show-error --location --proto-redir '=https' --max-time 20 --proto '=https' "$STARTER_URL" -o "$temp/check.tgz" ||
-             ! echo "d79e893e67557a8dd657cfb3e37367594d5632fffd792e903674211a8881fd5a  $temp/check.tgz" | sha256sum --check --status ||
+             ! echo "d9f0cb4778be7b4abadf3efc7b7309cfb32f006cbeef746dd6f682a770a2f0bd  $temp/check.tgz" | sha256sum --check --status ||
              ! tar -xOzf "$temp/check.tgz" package/starter-pr.mjs > "$temp/verify.mjs"; then
             printf '## Tokens& starter cases\n\nStatus: **verifier unavailable**\nNext: Rerun this job when the pinned public package is available.\n' >> "$GITHUB_STEP_SUMMARY"
             exit 1

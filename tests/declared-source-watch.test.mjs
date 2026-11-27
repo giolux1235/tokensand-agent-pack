@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -34,7 +34,7 @@ test('installed watcher rescores file-based policy and scoring edits and ignores
     const read = path => readFileSync(new URL(path,import.meta.url),'utf8');
     export default {id:'routing', maxCallsPerRun:{candidate:0}, repetitions:3,
       cases:[{id:'refund',input:'refund'},{id:'delivery',input:'delivery'}], checks:[{id:'correct'}],
-      sourceFiles:['policy.txt','.env.local','../outside/input','linked/input','fixtures'],
+      sourceFiles:[${JSON.stringify(existsSync(file('POLICY.TXT')) ? 'POLICY.TXT' : 'policy.txt')},'.env.local','../outside/input','linked/input','fixtures'],
       evaluatorSourceFiles:['fixtures/expected.json'], candidate:id=>id==='refund'?read('./policy.txt'):'track',
       evaluate:({input,output})=>({correct:output===(input==='refund'?JSON.parse(read('./fixtures/expected.json')):'track')})};`);
   execFileSync(process.execPath, [join(root,'package','cli.mjs'), '--install-test'], {cwd:project, env});
@@ -66,7 +66,31 @@ test('installed watcher rescores file-based policy and scoring edits and ignores
   await verdict(3, 3);
   replace('fixtures/expected.json','"confirm"');
   await verdict(6, 0);
+  // Replacing the directory with a symlink must not subscribe to its target.
+  // Restoring the original directory must subscribe to its regular file again.
+  write('../outside/expected.json','"confirm"');
+  renameSync(file('fixtures'),file('saved-fixtures'));
+  symlinkSync(outside,file('fixtures'),'dir');
+  await verdict(6, 0);
+  write('../outside/expected.json','"something else"');
+  await delay(850);
+  assert.doesNotMatch(output.slice(offset),/Watching for changes/);
+  unlinkSync(file('fixtures'));
+  renameSync(file('saved-fixtures'),file('fixtures'));
+  await verdict(6, 0);
+  replace('fixtures/expected.json','"request approval"');
+  await verdict(3, 3);
+  replace('fixtures/expected.json','"confirm"');
+  await verdict(6, 0);
   for (const name of ['.env.local','README.md','../outside/input','fixtures/unlisted']) write(name,'changed');
   await delay(850);
   assert.doesNotMatch(output.slice(offset),/Watching for changes/);
+  const adapter = readFileSync(file('observe.workflow.mjs'), 'utf8');
+  replace('observe.workflow.mjs', adapter.replace("export default", "read('./startup.txt'); export default"));
+  const deadline = Date.now()+5000;
+  while (!output.slice(offset).includes('Watching for changes.') && Date.now()<deadline) await delay(20);
+  assert.match(output.slice(offset),/could not initialize/);
+  offset = output.length;
+  write('startup.txt','ready');
+  await verdict(6, 0);
 });

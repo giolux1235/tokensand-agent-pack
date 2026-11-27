@@ -1,18 +1,16 @@
 // Included in the installed, self-contained checker. The child runs the normal
-// evaluator. Only local module paths cross its private IPC channel.
-let reportDeclaredWatchSources;
+// evaluator. Only watched paths cross its private IPC channel.
+let reportWatchPaths;
 
 async function reportWorkflowImports() {
   const modules = await import("node:module");
   const send = url => process.send({ type: "tokensand:watch-module", url });
-  const { dirname, resolve } = await import("node:path");
-  reportDeclaredWatchSources = (adapter, workflow) => {
-    for (const paths of [workflow.sourceFiles, workflow.evaluatorSourceFiles]) {
-      if (!Array.isArray(paths)) continue;
-      for (const path of paths) {
-        if (typeof path === "string" && path.length && !path.includes("\0")) {
-          process.send({ type: "tokensand:watch-source", url: pathToFileURL(resolve(dirname(adapter), path)).href });
-        }
+  const { resolve } = await import("node:path");
+  reportWatchPaths = (base, paths) => {
+    if (!Array.isArray(paths)) return;
+    for (const path of paths) {
+      if (typeof path === "string" && path.length && !path.includes("\0")) {
+        process.send({ type: "tokensand:watch-source", url: pathToFileURL(resolve(base, path)).href });
       }
     }
   };
@@ -61,8 +59,9 @@ async function reportWorkflowImports() {
 
 async function watchWorkflow(runner) {
   const { fork } = await import("node:child_process");
-  const { lstatSync, watch, watchFile, unwatchFile } = await import("node:fs");
+  const { lstatSync, realpathSync: realpath, watch, watchFile, unwatchFile } = await import("node:fs");
   const { dirname, isAbsolute, join, relative, resolve, sep } = await import("node:path");
+  runner = realpath.native(runner);
   const root = dirname(runner);
   const adapter = resolve(root, "observe.workflow.mjs");
   const files = new Set([runner, adapter]);
@@ -78,7 +77,7 @@ async function watchWorkflow(runner) {
     if (after.mtimeMs !== before.mtimeMs || after.ino !== before.ino || after.size !== before.size) changed();
   }
   function fallback(file) {
-    if (polling.has(file)) return;
+    if (polling.has(file) || !safeToPoll(file)) return;
     polling.add(file);
     watchFile(file, { interval: 600 }, statChanged);
   }
@@ -89,15 +88,15 @@ async function watchWorkflow(runner) {
       const handle = watch(dir, (event, name) => {
         if (!name) return changed();
         const path = join(dir, name);
-        if (files.has(path)) return changed();
         if (event === "rename" && directories.has(path)) {
           // A folder was replaced. Rebind its watchers on the next run.
           for (const [key, old] of directories) if (key === path || key.startsWith(path + sep)) {
             old?.close();
             directories.delete(key);
           }
-          changed();
+          return changed();
         }
+        if (files.has(path)) changed();
       });
       directories.set(dir, handle);
       handle.on("error", () => {
@@ -109,21 +108,33 @@ async function watchWorkflow(runner) {
       directories.set(dir, null);
     }
   }
-  // Explicit source declarations can name missing files. Watch their restoration,
-  // but never follow a symlink or turn a directory declaration into a tree watch.
-  function localFile(file) {
+  // Watch the first missing or symlinked entry from its real parent. A later
+  // replacement triggers discovery again without observing the symlink target.
+  function watchEntry(file) {
+    const parts = relative(root, file).split(sep);
+    let entry = root;
     try {
-      for (let path = file; path !== root; path = dirname(path)) {
-        const stat = lstatSync(path, { throwIfNoEntry: false });
-        if (stat && (path === file ? !stat.isFile() : !stat.isDirectory())) return false;
+      for (const part of parts) {
+        entry = join(entry, part);
+        const stat = lstatSync(entry, { throwIfNoEntry: false });
+        if (!stat || stat.isSymbolicLink()) return entry;
+        entry = realpath.native(entry);
+        const local = relative(root, entry);
+        if (!local || isAbsolute(local) || local.split(sep).includes("..")) return;
+        if (!stat.isDirectory()) return entry;
       }
-      return true;
+      return entry;
     } catch {
-      return false;
+      return;
     }
   }
+  function safeToPoll(file) {
+    if (watchEntry(file) !== file) return false;
+    const stat = lstatSync(file, { throwIfNoEntry: false });
+    return !stat || stat.isFile();
+  }
   function attach(file) {
-    if (!localFile(file)) {
+    if (watchEntry(file) !== file) {
       if (polling.delete(file)) unwatchFile(file, statChanged);
       return;
     }
@@ -174,10 +185,10 @@ async function watchWorkflow(runner) {
       let filename;
       try { filename = fileURLToPath(message.url); } catch { return; }
       const local = relative(root, filename);
-      if (!local || isAbsolute(local) || local.split(sep).some(part => part === ".." || part === "node_modules" ||
+      if (!local || isAbsolute(local) || local.toLowerCase().split(sep).some(part => part === ".." || part === "node_modules" ||
         part === ".git" || part === ".tokensand" || part === ".env" || part.startsWith(".env."))) return;
-      filename = resolve(root, local);
-      if (message.type === "tokensand:watch-source" && !localFile(filename)) return;
+      filename = watchEntry(resolve(root, local));
+      if (!filename) return;
       used.add(filename);
       if (files.has(filename)) return;
       files.add(filename);
