@@ -9,9 +9,9 @@ Use relevant existing context and continue authorized repository work; no additi
 
 ## Run a shared project
 
-When a builder asks to run a shared `tokensand.com/p/…` example, open that page and follow **Repo** or read its `SoftwareSourceCode.codeRepository` field. **Check your own project** opens setup for the visitor’s app. If the page links a README or demo at a specific commit in the same repo, use that revision and its instructions for the published example. Otherwise use the default branch and record the checked-out commit.
+When a builder asks to run a shared `tokensand.com/p/…` example, use `python3 SKILL_DIR/scripts/inspect_shared_project.py PUBLIC_PROJECT_URL` to locate the published edition. With one pinned file, it prints the repository, Git revision, path and source URL. If only a repository is linked, inspect it and record the commit you actually run. If the source is ambiguous, show the choices or ask the publisher for the exact revision. **Check your own project** starts setup for the visitor’s own app.
 
-Work in a fresh checkout, separate from the builder’s app. Inspect the commands and code before executing a trusted local check. Prefer the project’s documented checks and fixtures, using its own stack. If it supplies a compatible workflow adapter, the bundled runner below can run it without installing a checker. Keep the run local and free of credentials. If the example needs a provider, account or missing source, report the prerequisite. Report the tested revision, case names and observed outcomes, including a rerun when the project supplies a repair.
+Inspect the linked source and the publisher's instructions in a separate local checkout. Run a pinned README’s commands from that checkout. For a trusted offline Python or Node workflow adapter, use the bundled checker below with `--offline-workflow PATH`. A file that only defines a workflow can exit successfully without executing a case. Verify the named cases and scores. For a documented repair, use the same fixture and checks on both sides and name any missing coverage. Report the tested revision, failing cases and repaired results. Keep the run local and free of credentials. Ask before any provider-backed run.
 
 ## Check a workflow change
 
