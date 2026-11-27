@@ -100,6 +100,14 @@ From the full Agent Pack install, use Python 3.9+ and each trusted checkout’s 
 python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_vitest.py" --before-root ../before tests/orders.test.ts
 ```
 
+To decide between two proposals, run the baseline once and review each checkout against it:
+
+```sh
+python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_vitest.py" --before-root ../before --after-root ../proposal-a --after-root ../proposal-b tests/orders.test.ts
+```
+
+Each proposal gets its own verdict. Exit 0 means every proposal verified, 100 means at least one needs review, and 1 means evidence was unusable for at least one. Other candidates still get reviewed. A changed test with an unchanged implementation is a reason to hold. No original-test replay on that candidate is implied.
+
 Claude Code can use `$HOME/.claude/skills` instead. For a project-local install use `.agents/skills` or `.claude/skills`. Install each checkout’s locked dependencies first. `--config vitest.special.config.ts` selects an explicit config. The adjacent module with the same basename as the selected test is recognized as its implementation. Otherwise add `--implementation src/orders.ts` for the intended change. Reserve this flag for code under test and keep expectations as controls. Declare external fixture files read through the filesystem with `--test-source FILE`. Use `--show-names` locally to see the failing file and case title, which may contain private fixture data.
 
 Each side runs fresh in CI mode with snapshot updates disabled and application environment variables omitted. Exit 0 verifies an ordinary failing case recovered with the same named cases, checked inputs and a fully passing candidate. Exit 100 holds the decision. Exit 1 means unusable setup or evidence. Results cover the selected files in one project. The reviewer checks reached local Vite modules, active config and setup, package manifests, standard snapshots and directly named file snapshots. A changed helper or a dynamic file snapshot holds the decision. Arbitrary filesystem reads, external packages and environment-dependent behavior need separate review. Use trusted offline suites; the runner does not sandbox their network or filesystem access. The reviewer sends no data.
