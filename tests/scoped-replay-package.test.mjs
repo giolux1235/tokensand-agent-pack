@@ -9,7 +9,7 @@ import test from 'node:test';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const pkg = version => join(root, 'packages', `tokensand-workflow-check-${version}.tgz`);
-const latest = '0.1.30';
+const latest = '0.1.31';
 const sha = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 test('the standalone Node download uses the release tested by the installer', () => {
@@ -145,6 +145,7 @@ test('paired checks use the same criteria in npm, the direct download and the in
     prepare(10);
     const broken = check();
     assert.equal(broken.status, 1, broken.text);
+    assert.match(broken.text, /Candidate check failed: "order" \/ "quantity" · trial 1. Full check continues\./);
     assert.match(broken.text, /Existing failure: "order" \/ "quantity"/);
     prepare(10, true);
     const weakened = check();
@@ -170,6 +171,7 @@ for (const [version, installedSha] of [
   ['0.1.27', '75e58b67b15379a7696491561f8d0086a9b5b992e29a02bf2f4ecb69036f68af'],
   ['0.1.28', '041faedfa05aa9c1e9e5b02f5de50e80ec5cff496b7d2cf6b29796b43b93b576'],
   ['0.1.29', 'c63f835155e1d28cc9f8536acff4df70de0479c388860d1c07308cd27136b377'],
+  ['0.1.30', 'a11444f601ee2b378715b1f7ea711ea7bb2a39de36eb70dda1fd13563c6042c9'],
 ]) {
   test('upgrades the unmodified '+version+' runner and protects local edits',t=>{
     const {dir,run,unpack}=fixture(t);
@@ -202,7 +204,7 @@ for (const [version, installedSha] of [
 
 test('packaged checker and preload exactly match the Agent Pack; unaffected release tools keep their bytes',t=>{
   const {unpack}=fixture(t);
-  const old=unpack('0.1.29'), next=unpack(latest);
+  const old=unpack('0.1.30'), next=unpack(latest);
   const scripts=join(root,'plugins/tokensand-agent-pack/skills/tokensand-agent-pack/scripts');
   assert.equal(sha(join(next,'agent-check.mjs')),sha(join(scripts,'check_workflow.mjs')));
   assert.equal(sha(join(next,'trace_ai_sdk_7.mjs')),sha(join(scripts,'trace_ai_sdk_7.mjs')));

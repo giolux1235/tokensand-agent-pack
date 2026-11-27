@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,7 +25,7 @@ function run(t, overrides='', options=['--compare-baseline','--case=picked']) {
   const child=spawnSync(process.execPath,[runner,'--offline-workflow',adapter,...options],{cwd,encoding:'utf8',timeout:14000,
     env:{PATH:process.env.PATH,HOME:cwd,TMPDIR:cwd,NO_COLOR:'1'}});
   assert.ifError(child.error);
-  return {code:child.status, text:child.stdout+child.stderr};
+  return {code:child.status, text:child.stdout+child.stderr, stderr:child.stderr};
 }
 test('recovers named checks with identical state, independent inputs and isolated arm processes',t=>{
   const got=run(t,`evaluate:({input,output,variant})=>({stock:()=>variant==='candidate',missing:input.n===0 && output>=1 && output<=3})`);
@@ -32,6 +33,7 @@ test('recovers named checks with identical state, independent inputs and isolate
   assert.match(got.text,/Recovered: "picked" \/ "stock" · trials 1, 2, 3/);
   assert.match(got.text,/Passed both: "picked" \/ "missing" · trials 1, 2, 3/);
   assert.doesNotMatch(got.text,/other/);
+  assert.equal(got.stderr,'');
 });
 test('names new, existing, and incomplete checks without revealing raw app errors or output',t=>{
   const data=`baseline:()=>{console.error('sensitive-app-log');return 'private value'},candidate:()=>{console.log('sensitive-app-log');return 'private value'},
@@ -49,7 +51,7 @@ test('holds on drift, setup or invalid selection before claiming a comparison',t
     `baseline:undefined`, `evaluate:undefined`, `checks:[{id:'same'},{id:'same'}]`,
     `timeoutMs:-1`, `checksVersion:String(Math.random())`, `cases:[{id:'picked',input:{fresh:Math.random()}}]`,
   ]) {
-    const got=run(t,invalid);assert.equal(got.code,2,got.text);assert.doesNotMatch(got.text,/Recovered:|Passed both:/);
+    const got=run(t,invalid);assert.equal(got.code,2,got.text);assert.doesNotMatch(got.text,/Candidate check|Recovered:|Passed both:/);
   }
   const unknown=run(t,'',['--compare-baseline','--case=absent']);assert.equal(unknown.code,2);
   const inspect=run(t,'',['--compare-baseline','--inspect-values','--case=picked']);assert.equal(inspect.code,2);
@@ -169,4 +171,56 @@ test('rejects duplicate and malformed policy arguments and accidental use outsid
     assert.equal(got.code,2,got.text);
     assert.doesNotMatch(got.text,/private-label|Recovered:|Passed both:|New failures:/);
   }
+});
+
+test('reports the first validated candidate issue while later callbacks can still run', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'paired-live-cue-'));
+  t.after(() => rmSync(dir, {recursive:true, force:true}));
+  writeFileSync(join(dir, 'workflow.mjs'), `import {existsSync, writeFileSync} from 'node:fs';
+    import {setTimeout as sleep} from 'node:timers/promises';
+    export default {
+      cases:[{id:'refund',input:0},{id:'later',input:1}], checks:[{id:'amount'}],
+      maxCallsPerRun:{baseline:0,candidate:0}, timeoutMs:3500,
+      baseline:()=>true, candidate:async (i)=>{
+        if(i===0)return false;
+        for(let n=0; n<200 && !existsSync('seen'); n++)await sleep(10);
+        writeFileSync('later-finished','yes');
+        return existsSync('seen');
+      }, evaluate:({output})=>({amount:output}),
+    };`);
+  const child = spawn(process.execPath, [runner, '--offline-workflow', './workflow.mjs', '--compare-baseline'], {
+    cwd:dir, env:{PATH:process.env.PATH, HOME:dir, TMPDIR:dir}, stdio:['ignore','pipe','pipe'], timeout:10000,
+  });
+  let stderr='', stdout='', beforeCompletion=false;
+  child.stderr.setEncoding('utf8').on('data', chunk => {
+    stderr += chunk;
+    if (stderr.includes('Full check continues.') && !existsSync(join(dir,'seen'))) {
+      beforeCompletion = !existsSync(join(dir,'later-finished'));
+      writeFileSync(join(dir,'seen'),'yes');
+    }
+  });
+  child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+  const [code] = await once(child,'close');
+  assert.equal(code,1);
+  assert.equal(beforeCompletion,true);
+  assert.equal(stderr.trim(),'Candidate check failed: "refund" / "amount" · trial 1. Full check continues.');
+  assert.match(stdout,/New failure: "refund" \/ "amount"/);
+  assert.match(stdout,/Passed both: "later" \/ "amount"/);
+});
+
+test('shows one unscored observation, redacts sensitive IDs, and withholds unknown criteria', t => {
+  const fixture = `cases:[{id:'sk-example-private',input:{n:0}}],checks:[{id:'tobs_private',label:'unreviewed label'}],
+    repetitions:3,evaluate:()=>({tobs_private:null})`;
+  const r = run(t, fixture,['--compare-baseline']);
+  assert.equal(r.code,1);
+  assert.equal(r.stderr.trim(),'Candidate check unscored: #1 / #1 · trial 1. Full check continues.');
+  assert.doesNotMatch(r.text,/sk-example-private|tobs_private|unreviewed label/);
+  assert.match(r.text,/Unscored .*#1 \/ #1 · trials 1, 2, 3/);
+  const changed = run(t, fixture + `,checks:[{id:(await import('node:fs')).existsSync('did-baseline')?'candidate-only-label':'known'}],
+    baseline:async()=>{(await import('node:fs')).writeFileSync('did-baseline','yes');return 1}`, ['--compare-baseline']);
+  assert.equal(changed.code,2);
+  assert.doesNotMatch(changed.text,/Candidate check|candidate-only-label/);
+  const missing = run(t, fixture, ['--compare-baseline','--require-check=must-have']);
+  assert.equal(missing.code,2);
+  assert.doesNotMatch(missing.text,/Candidate check|sk-example-private|tobs_private/);
 });
