@@ -130,7 +130,7 @@ Enable **Repository checks** in your [private app](https://tokensand.com/dashboa
 
 ### Review an existing Python test
 
-From the later checkout, ask Codex or Claude Code to run the same pytest target against the earlier checkout and show which cases recovered. With the global skill installed, you can also run one command.
+From the later checkout, ask Codex or Claude Code to compare the same pytest target across both revisions. To update an existing skill, rerun the [Agent Pack install command](#check-a-change-with-codex-or-claude-code) and start a new session. With the global skill installed, you can run the reviewer directly.
 
 ```sh
 python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_pytest.py" --run --before-root ../earlier-service tests/test_workflow.py
