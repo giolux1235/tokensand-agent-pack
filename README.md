@@ -58,20 +58,20 @@ To check a repair in your repo, ask your agent: “Check this change against the
 Use the same pinned private Node SDK for both runs. The reviewer recognizes 0.7.7 and 0.7.8. From a clean candidate checkout, choose the earlier release tag and its saved run. Declare the app code in `sourceFiles`. If the scorer changed, the reviewer flags the saved result for review.
 
 ```sh
-npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.19/tokensand-workflow-check-0.1.19.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
+npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.22/tokensand-workflow-check-0.1.22.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
 ```
 
 Open `review.html` to see the blocking cases, their scores and both Git revisions. Review the case names before sharing the note. Keep your run directories and private inputs and outputs on your machine.
 
-A teammate can save the note as `review.html` and run this in the trusted candidate service checkout with both Git revisions available locally.
+Save the note as `review.html` in the trusted candidate service checkout with both Git revisions available locally. This command also works with notes created by older checkers.
 
 ```sh
-npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.19/tokensand-workflow-check-0.1.19.tgz --recheck-release ./review.html --all-cases --run
+npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.22/tokensand-workflow-check-0.1.22.tgz --recheck-release ./review.html --all-cases --run
 ```
 
-This rechecks every case **in the note**, three times per revision, using the earlier scorer. To narrow the selection, replace `--all-cases` with one or more `--case ID` flags. Self-contained workflows need no private SDK or account for replay. For offline use, install the pinned archive once and use `tokensand-check` in place of `npx --yes URL`.
+This rechecks each case **in the note** using the earlier scorer. It repeats the recorded 3–10 trials per revision. A case without recorded counts starts with three. If the note covers fewer trials than the committed workflow, regenerate it after a full run. To narrow the selection, replace `--all-cases` with one or more `--case ID` flags. Self-contained workflows need no private SDK or account for replay. For offline use, install the pinned archive once and use `tokensand-check` in place of `npx --yes URL`.
 
-Release review and replay exit `100` for a verified regression, `2` for inconclusive evidence and `0` when all selected cases pass. Omit `--run` to inspect a received note without executing project code. That preview also exits `2`. Three fresh passing trials leave a case inconclusive if the original check used more.
+Release review and replay exit `100` for a verified regression, `2` for inconclusive evidence and `0` when all selected cases pass. Omit `--run` to inspect a received note without executing project code. That preview also exits `2`. If the same revision failed in the note and passes in isolation, rerun the full workflow in its original order. The decision stays inconclusive until you resolve that difference.
 
 ### Review an existing Python test
 
