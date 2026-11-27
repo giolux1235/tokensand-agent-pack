@@ -7,7 +7,7 @@ from pathlib import Path
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 here = Path(__file__).resolve().parent
-version = "0.1.0"
+version = "0.1.1"
 distribution = f"tokensand_pytest_checks-{version}"
 dist = distribution + ".dist-info"
 capture = here.parents[1] / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/scripts/capture_pytest.py"
