@@ -162,7 +162,7 @@ class OriginalReview(unittest.TestCase):
     def test_recipient_rejects_the_same_counts_from_a_different_selection(self):
         for root in (self.base, self.peer):
             (root / "second.test.mjs").write_text(TEST)
-            self.git(root, "add", ".")
+            self.git(root, "add", "route.mjs", "second.test.mjs")
             self.git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                      "commit", "-qm", "second suite")
         common = [sys.executable, "-B", str(CLI), "--before-root", str(self.base), "--after-root", str(self.peer),
