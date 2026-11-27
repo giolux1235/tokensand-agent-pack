@@ -92,7 +92,11 @@ Check official eligibility, expiry and redemption steps. Perks and skills are ex
 
 For requested projects, use `draft_project` with `autoDetect:false` and explicit metadata. The MCP server's working directory is not necessarily the active editor task's repository. Both `draft_project` and `publish_project` read local files only with explicit `autoDetect:true`; confirm the intended repository first.
 
-Call `publish_project` only after the user reviews the draft and explicitly confirms public publishing. For requested Skill import, call `publish_agent_skill` with a public `skillUrl` and `confirm:false`; after review, `confirm:true` creates a private dashboard draft. Public Skill publishing is separate.
+After the user approves the exact public fields, call `publish_project` with those fields, `autoDetect:false` and `confirm:true`. Return the canonical public URL. On a duplicate, reuse the returned link if present. Identify a private edit link as private. For a conflict without a link, relay the conflict. Check the status of an uncertain write before retrying.
+
+When the published repository matches the publisher’s open checkout, include one exact command for its existing offline workflow test, if available. Use the project’s documented test environment and target. If they also requested a check, run it here and report the case outcomes. Publication alone leaves tests unrun and results private.
+
+For requested Skill import, call `publish_agent_skill` with a public `skillUrl` and `confirm:false`; after review, `confirm:true` creates a private dashboard draft. Public Skill publishing is separate.
 
 Preserve the server-issued `sourceAttribution.directoryContextReceiptId` through an explicit save, project publication, and adoption SDK receipts; never invent it. Use a distinct `sessionId` for each real execution and keep tracking keys server-side. Keep QA/synthetic events separate. Recommendations, saves, self-reports, and verified product usage are different evidence; private content does not become public proof.
 
