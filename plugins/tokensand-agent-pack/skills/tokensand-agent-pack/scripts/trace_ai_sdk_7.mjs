@@ -314,11 +314,17 @@ export async function createTrialToolInspector() {
       return {
         async run(callback) {
           try {
-            const value = available && trial.open ? controller.scopes.run(trial, callback) : callback();
-            // Close synchronous candidates before any detached microtasks they scheduled run.
-            if (value != null && (typeof value === "object" || typeof value === "function")
-                && (types.isProxy(value) || "then" in value)) return await value;
-            return value;
+            function invoke() {
+              const value = callback();
+              // A lazy thenable can start the SDK request when the promise adopts it.
+              if (value != null && (typeof value === "object" || typeof value === "function")
+                  && (types.isProxy(value) || "then" in value)) return Promise.resolve(value);
+              return value;
+            }
+            const result = available && trial.open ? controller.scopes.run(trial, invoke) : invoke();
+            // Close synchronous candidates before their detached microtasks run.
+            if (types.isPromise(result)) return await result;
+            return result;
           } finally { seal(); }
         },
         close() {

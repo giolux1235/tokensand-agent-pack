@@ -105,6 +105,25 @@ test("timing-only inspection reports completed calls without deriving value diff
   assert(!Object.hasOwn(rows[0],"result") && !Object.hasOwn(rows[0],"modelResult"));
 });
 
+test("a lazy thenable starts and settles its tool inside the trial", t => {
+  const {summary,rows}=exercise(t, fakeEvents + `
+    const trial=capture.startTrial(1);
+    let invocations=0;
+    const returnValue=await trial.run(()=>({
+      then(resolve){
+        invocations++;
+        const generation=start("lazy");
+        setImmediate(()=>{ done(generation,"balance",1250,12.5); resolve("complete"); });
+      },
+    }));
+    assert.equal(invocations,1);
+    assert.equal(returnValue,"complete");
+    console.log(JSON.stringify(trial.close()));`,{selector:"."});
+  assert.equal(summary.observed,1);
+  assert.equal(summary.tools[0].changed,1);
+  assert.deepEqual(rows.map(r=>[r.trial,r.tool,r.result,r.modelResult]),[[1,"balance",1250,12.5]]);
+});
+
 test("an absent SDK leaves an ordinary project quiet and preserves candidate rejection", t => {
   const {summary,stderr,rows}=exercise(t,`
     const trial=capture.startTrial(1);
@@ -117,7 +136,7 @@ test("an absent SDK leaves an ordinary project quiet and preserves candidate rej
 });
 
 const real = process.env.TOKENSAND_TEST_AI_SDK7_DIR;
-test("native AI SDK 7 propagates two concurrent candidate scopes and honors application redaction", {skip:!real}, t => {
+test("native AI SDK 7 propagates concurrent eager and lazy candidate scopes and honors application redaction", {skip:!real}, t => {
   const {summary,rows}=exercise(t,`
     const {generateText,stepCountIs,tool}=await import("ai");
     const {MockLanguageModelV4}=await import("ai/test");
@@ -133,11 +152,14 @@ test("native AI SDK 7 propagates two concurrent candidate scopes and honors appl
         telemetry:privateOutput?{recordOutputs:false}:undefined,
         tools:{count:tool({inputSchema:z.object({}),execute:async()=>value,toModelOutput:({output})=>({type:"json",value:output+1})})}});
     }
-    const a=capture.startTrial(1),b=capture.startTrial(2);
-    await Promise.all([a.run(()=>replay(6,false)),b.run(()=>replay(9,true))]);
-    console.log(JSON.stringify([a.close(),b.close()]));`,{sdk:real,selector:"."});
+    const a=capture.startTrial(1),b=capture.startTrial(2),c=capture.startTrial(3);
+    await Promise.all([a.run(()=>replay(6,false)),b.run(()=>replay(9,true)),
+      c.run(()=>({then(resolve,reject){replay(12,false).then(resolve,reject);}}))]);
+    console.log(JSON.stringify([a.close(),b.close(),c.close()]));`,{sdk:real,selector:"."});
   assert.equal(summary[0].tools[0].changed,1);
   assert.equal(summary[1].tools[0].unavailable,1);
+  assert.equal(summary[2].tools[0].changed,1);
+  assert.deepEqual(rows.filter(r=>r.trial===3).map(r=>[r.result,r.modelResult]),[[12,13]]);
   assert.deepEqual(rows.filter(r=>r.trial===1).map(r=>[r.result,r.modelResult]),[[6,7]]);
   assert(rows.some(r=>r.trial===2 && !Object.hasOwn(r,"result") && !Object.hasOwn(r,"modelResult")));
 });
