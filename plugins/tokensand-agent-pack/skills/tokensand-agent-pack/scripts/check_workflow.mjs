@@ -89,6 +89,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     }
   }
   if (!selected || typeof selected !== "object") setupError("Provide a workflow object as the module's default export.");
+  if (adapter && typeof reportDeclaredWatchSources === "function") reportDeclaredWatchSources(adapter, selected);
   if (selected.maxCallsPerRun?.candidate !== 0) setupError("Set the offline candidate provider budget to zero.");
   if (!Array.isArray(selected.cases) || !selected.cases.length) setupError("Provide at least one case.");
   if (!Array.isArray(selected.checks) || !selected.checks.length) setupError("Provide at least one named check.");

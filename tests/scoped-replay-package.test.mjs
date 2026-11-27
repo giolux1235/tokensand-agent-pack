@@ -9,7 +9,7 @@ import test from 'node:test';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const pkg = version => join(root, 'packages', `tokensand-workflow-check-${version}.tgz`);
-const latest = '0.1.26';
+const latest = '0.1.27';
 const sha = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 function fixture(t) {
@@ -110,6 +110,7 @@ for (const [version, installedSha] of [
   ['0.1.19', '35d32d550d4b7d226b34b1bc3710f63624bf5bcd49bb65cd6a3a4f6cc08e4ac6'],
   ['0.1.24', '35d32d550d4b7d226b34b1bc3710f63624bf5bcd49bb65cd6a3a4f6cc08e4ac6'],
   ['0.1.25', 'e80168f21af0b37b274348f27fb6e9a0e50a7287560284f7db813ae2b59151f6'],
+  ['0.1.26', '2a8e9f35bc7a988417a88d2b10d0ae6bcc565d6db13df75c3d0227dfb63f47a4'],
 ]) {
   test('upgrades the unmodified '+version+' runner and protects local edits',t=>{
     const {dir,run,unpack}=fixture(t);
@@ -142,7 +143,7 @@ for (const [version, installedSha] of [
 
 test('packaged checker and preload exactly match the Agent Pack; unaffected release tools keep their bytes',t=>{
   const {unpack}=fixture(t);
-  const old=unpack('0.1.25'), next=unpack(latest);
+  const old=unpack('0.1.26'), next=unpack(latest);
   const scripts=join(root,'plugins/tokensand-agent-pack/skills/tokensand-agent-pack/scripts');
   assert.equal(sha(join(next,'agent-check.mjs')),sha(join(scripts,'check_workflow.mjs')));
   assert.equal(sha(join(next,'trace_ai_sdk_7.mjs')),sha(join(scripts,'trace_ai_sdk_7.mjs')));
@@ -151,7 +152,8 @@ test('packaged checker and preload exactly match the Agent Pack; unaffected rele
   assert.equal(readFileSync(join(next,verifier),'utf8'),readFileSync(join(old,verifier),'utf8')
     .replace(sha(join(old,'agent-check.mjs')),sha(join(next,'agent-check.mjs'))));
   assert.deepEqual(JSON.parse(readFileSync(join(next,'package.json'))).files,manifest.files);
-  for(const name of manifest.files.filter(x=>!['cli.mjs','install-test.mjs','agent-check.mjs','standalone-check.mjs',verifier].includes(x)))
+  assert.equal(sha(join(next,'watch-workflow.mjs')),sha(join(root,'packages','watch-workflow.mjs')));
+  for(const name of manifest.files.filter(x=>!['watch-workflow.mjs','install-test.mjs','agent-check.mjs','standalone-check.mjs',verifier].includes(x)))
     assert.equal(sha(join(old,name)),sha(join(next,name)),name);
 });
 
