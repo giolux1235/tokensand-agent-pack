@@ -51,6 +51,15 @@ class ValuePreview(reprlib.Repr):
 
 
 class GroupedTrialResult(unittest.TextTestResult):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.passed_by_case = {}
+
+    def addSuccess(self, test):
+        super().addSuccess(test)
+        key = (test.trial_position[0], test.case_id, test.trial_count)
+        self.passed_by_case[key] = self.passed_by_case.get(key, 0) + 1
+
     def printErrorList(self, flavour, errors):
         # Scored issues appear in the case summary. Keep native tracebacks for
         # application and evaluator exceptions that ran outside a named check.
@@ -76,6 +85,9 @@ class GroupedTrialResult(unittest.TextTestResult):
                     detail += " (trials " + ", ".join(map(str, trials)) + ")"
                 counts.append(detail)
             self.stream.writeln(f"{case_id} — {name}: {', '.join(counts)}")
+        for (_, case_id, total), passed in self.passed_by_case.items():
+            if passed == total:
+                self.stream.writeln(f"{case_id} — passed {passed}/{total} trials")
 
 
 def resolved_result(value, callback):
@@ -202,7 +214,7 @@ if __name__ == "__main__":
         suite = case_suite(workflow, args.case, args.inspect_values, score_issues=score_issues)
     except ValueError as error:
         parser.error(str(error))
-    group_trials = not args.verbose and (args.case or workflow.get("repetitions", 1) > 1)
+    group_trials = not args.verbose and not args.case and workflow.get("repetitions", 1) > 1
     runner = unittest.TextTestRunner(verbosity=0, resultclass=GroupedTrialResult) if group_trials else unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
     if any(unscored for _, unscored in score_issues):

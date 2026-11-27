@@ -135,6 +135,27 @@ workflow = dict(repetitions=3, cases=[{"id": c, "input": c} for c in ("mixed", "
             self.assertEqual(verbose.stderr.count("Traceback "), 6)
             self.assertNotIn(" — ", verbose.stderr)
 
+    def test_grouped_runs_identify_all_fully_passing_cases_and_respect_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = Path(tmp) / "passing.py"
+            adapter.write_text("""
+workflow = dict(repetitions=4, cases=[{"id": c, "input": c} for c in ("one", "two", "three")],
+                candidate=lambda item: item, evaluate=lambda *args: {"shape": True},
+                checks=[{"id": "shape"}])
+""")
+            command = [sys.executable, "-I", "-B", SCRIPT, "--offline-workflow", adapter]
+            for selection in ([], ["two", "three"]):
+                args = [arg for case in selection for arg in ("--case", case)]
+                run = subprocess.run([*command, *args], capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                if selection:
+                    self.assertNotIn("one (trial", run.stderr)
+                    for case in selection:
+                        self.assertIn(f"{case} (trial 4/4)", run.stderr)
+                else:
+                    printed = [line for line in run.stderr.splitlines() if " — " in line]
+                    self.assertEqual(printed, [f"{case} — passed 4/4 trials" for case in ["one", "two", "three"]])
+
     def test_repetitions_isolate_a_consumed_grader_input(self):
         import runpy
         result = unittest.TestResult()

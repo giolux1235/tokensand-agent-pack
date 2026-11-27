@@ -132,7 +132,7 @@ If you edited `test_tokensand_first.py`, run `python3 -m tokensand_check --offli
 
 For an async agent, import `asyncio` and return `asyncio.run(agent.ainvoke(item))` from `candidate(item, ctx=None)`. The optional second argument accepts the context passed by the private SDK’s workflow worker. Collect streamed replies before scoring them.
 
-Try the [SQLite sync example](examples/incremental-sync.py) as `my_workflow.py`. The initial read passes. Resuming a page drops a record when two timestamps match. Rerun with `FIX_CURSOR=1` to verify the repair. Repeated runs show each affected case and check with its trial counts. Add `--verbose` for the individual trial reports. Give an annotation prerequisite its own named check when the reviewer needs to distinguish a missing label from other unscored results. The summary shows how many trials failed and how many lacked a required score. An affected trial can appear in both counts.
+Try the [SQLite sync example](examples/incremental-sync.py) as `my_workflow.py`. The initial read passes. Resuming a page drops a record when two timestamps match. Rerun with `FIX_CURSOR=1` to verify the repair. Repeated full runs show each affected case and check with its trial counts. Use `--verbose` for individual trial reports, or `--case CASE_ID` for a detailed replay. Give an annotation prerequisite its own named check when the reviewer needs to distinguish a missing label from other unscored results. The summary shows how many trials failed and how many lacked a required score. An affected trial can appear in both counts.
 
 ### Check a Lovable project
 
