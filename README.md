@@ -100,7 +100,7 @@ Choose a trusted offline test file or a pytest node ID. Each checkout uses its o
 
 The reviewer runs pytest once per checkout. It holds unexpected passes, skipped cases, incomplete runs and changed tests for review. An unexpected pass means the assertion passed while its expected-failure marker was active. A clean repair under the same controls exits 0, a held decision exits 100, and a setup error exits 1. The review shows case outcomes. Run the named test directly for its traceback. Tests and plugins keep their own network and tracing settings.
 
-The reviewer compares the selected tests, ancestor `conftest.py` files and active pytest configuration. Add imported fixtures, data or additional configuration with `--test-source PATH`.
+The reviewer compares the files defining the selected tests, including inherited test methods, ancestor `conftest.py` files and active pytest configuration. Add imported fixtures, data or additional configuration with `--test-source PATH`.
 
 For a shared editable environment, the reviewer checks that project modules load from the checkout being tested. It holds the decision when a module loads from the wrong checkout.
 

@@ -169,7 +169,7 @@ def test_sources(roots, paths, active_configs=()):
     return sources
 
 
-def verdict(before, after, sources, *, pytest_exits=None, issues=()):
+def verdict(before, after, sources, *, pytest_exits=None, issues=(), defining_sources=()):
     native = pytest_exits is not None
     same_sources = all(old == new for _, old, new, _ in sources)
     comparable = same_sources and before.keys() == after.keys() and not issues
@@ -189,6 +189,8 @@ def verdict(before, after, sources, *, pytest_exits=None, issues=()):
     for path, old, new, is_declared in sources:
         detail = old if old == new else f"{old or 'missing'} -> {new or 'missing'} (changed)"
         label = "Declared source" if is_declared else ("Pytest control" if native else "Ancestor control")
+        if path in defining_sources:
+            label = "Defining test source"
         print(f"{label} {json.dumps(str(path))}: {detail}")
     if not same_sources:
         print("Test sources or fixture/config files changed. Rerun both implementations with the same controls.")
@@ -208,7 +210,7 @@ def verdict(before, after, sources, *, pytest_exits=None, issues=()):
             print("A strict unexpected pass fails the native pytest policy.")
         if outcomes & {"xpassed", "xpassed-strict"}:
             print("An expected failure passed its assertion. Review the expectation and rerun both revisions under the same policy.")
-        print("Local runs cover the selected cases and compared tests. Pytest checks imports from the other checkout "
+        print("Local runs compare the selected cases and their defining test sources. Pytest checks imports from the other checkout "
               "and module origins in the root and selected src trees. Declare imported fixtures and data with --test-source.")
     else:
         print(SCOPE + " With both checkouts, use --run for native pytest outcomes.")
@@ -291,10 +293,12 @@ NATIVE_ISSUES = {
 def native_run(root, peer, interpreter, targets, destination, arm, source_dirs):
     if not interpreter.is_file():
         raise Invalid(f"The {arm} interpreter is missing. Set --{arm}-python to this checkout’s Python with pytest installed.")
-    helper = Path(__file__).with_name("capture_pytest.py").resolve(strict=True)
+    helper = Path(__file__).with_name("tokensand_pytest_definitions.py").resolve(strict=True)
     # The child uses the project's own environment. Test output and marker reasons stay private.
-    result = subprocess.run([str(interpreter), str(helper), str(destination), *targets], cwd=root,
-                            env=interpreter_environment(interpreter, root, peer, source_dirs), stdin=subprocess.DEVNULL,
+    definitions_file = destination.with_suffix(".definitions.json")
+    env = interpreter_environment(interpreter, root, peer, source_dirs)
+    result = subprocess.run([str(interpreter), str(helper), str(destination), *targets],
+                            cwd=root, env=env, stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not destination.is_file():
         raise Invalid(f"The {arm} run produced no native result. Check --{arm}-python and run the selection locally with python -m pytest.")
@@ -337,7 +341,28 @@ def native_run(root, peer, interpreter, targets, destination, arm, source_dirs):
         if key in cases:
             raise Invalid(f"The {arm} result contains duplicate case identities.")
         cases[key] = state
-    return cases, issues, result.returncode, config, digest
+    if not definitions_file.is_file() or definitions_file.stat().st_size > LIMIT:
+        raise Invalid(f"The {arm} run omitted usable test definitions.")
+    evidence = json.loads(definitions_file.read_text(encoding="utf-8"))
+    if (not isinstance(evidence, dict) or not isinstance(evidence.get("cases"), dict)
+            or not isinstance(evidence.get("sources"), dict)):
+        raise Invalid(f"The {arm} run has invalid test definitions.")
+    definitions = evidence["cases"]
+    hashes = {}
+    for name, checksum in evidence["sources"].items():
+        path = Path(name)
+        if (not path.parts or path.is_absolute() or ".." in path.parts or not isinstance(checksum, str)
+                or not re.fullmatch("[0-9a-f]{64}", checksum)):
+            raise Invalid(f"The {arm} run has invalid test definitions.")
+        hashes[path] = checksum
+    for nodeid, _ in record["cases"]:
+        locations = definitions.get(nodeid)
+        if not isinstance(locations, list) or not locations:
+            issues.append(f"{arm}: Could not identify a checkout-local Python test definition for every case.")
+        elif any(not isinstance(row, list) or len(row) != 2 or not isinstance(row[0], str)
+                 or Path(row[0]) not in hashes or type(row[1]) is not int or row[1] < 1 for row in locations):
+            raise Invalid(f"The {arm} run has invalid test definitions.")
+    return cases, issues, result.returncode, config, digest, definitions, hashes
 
 
 def run_review(args):
@@ -359,13 +384,17 @@ def run_review(args):
     source_dirs = sorted({str(parent / "src") for path in declared for parent in path.parents
                           if any((root / parent / "src").is_dir() for root in roots)})
     with tempfile.TemporaryDirectory(prefix="tokensand-pytest-") as temp:
-        before, first_issues, before_exit, before_config, before_digest = native_run(
+        before, first_issues, before_exit, before_config, before_digest, first_definitions, first_hashes = native_run(
             roots[0], roots[1], native_interpreter(roots[0], args.before_python),
             args.targets, Path(temp, "before.json"), "before", source_dirs)
-        after, last_issues, after_exit, after_config, after_digest = native_run(
+        after, last_issues, after_exit, after_config, after_digest, last_definitions, last_hashes = native_run(
             roots[1], roots[0], native_interpreter(roots[1], args.after_python),
             args.targets, Path(temp, "after.json"), "after", source_dirs)
-    issues = first_issues + last_issues
+    issues = list(dict.fromkeys(first_issues + last_issues))
+    for nodeid in first_definitions.keys() & last_definitions.keys():
+        if first_definitions[nodeid] != last_definitions[nodeid]:
+            issues.append("A selected test resolved to a different definition. Rerun both implementations with the same test definition.")
+            break
     if sources != test_sources(roots, files + args.test_source):
         issues.append("A declared test source changed during execution. Review the changes and rerun.")
     if before_config != after_config:
@@ -374,8 +403,15 @@ def run_review(args):
     for root, config, digest in zip(roots, (before_config, after_config), (before_digest, after_digest)):
         if config is not None and source_sha(root, config) != digest:
             issues.append("The active pytest configuration changed during execution.")
-    sources = test_sources(roots, files + args.test_source, configs)
-    return verdict(before, after, sources, pytest_exits=(before_exit, after_exit), issues=issues)
+    sources = test_sources(roots, declared, configs)
+    for root, checksums in zip(roots, (first_hashes, last_hashes)):
+        if any(source_sha(root, path) != digest for path, digest in checksums.items()):
+            issues.append("A defining test source changed during execution. Review the change and rerun.")
+    other_definitions = (first_hashes.keys() | last_hashes.keys()) - {path for path, *_ in sources}
+    for path in sorted(other_definitions):
+        sources.append((path, first_hashes.get(path), last_hashes.get(path), False))
+    return verdict(before, after, sources, pytest_exits=(before_exit, after_exit), issues=issues,
+                   defining_sources=other_definitions)
 
 
 def main():
