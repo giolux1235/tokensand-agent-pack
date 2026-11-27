@@ -114,6 +114,12 @@ test('last item',()=>expect(route([3,8])).toBe(existsSync(new URL('./use-last.tx
         (self.after / "route.test.mjs").write_text(text.replace("?8:3", "?3:3"))
         result = self.review(100)
         self.assertIn("Original tests (replayed): 0/1 passed, 1 failed.", result)
+        # A removed tracked data file can also change a conditional oracle.
+        (self.after / "route.test.mjs").write_text(text)
+        (self.after / "route.mjs").write_text(BAD + "// equivalent\n")
+        (self.after / "use-last.txt").unlink()
+        self.assertIn("unbound tracked data file changed", self.review(100, replay=False))
+        (self.after / "use-last.txt").write_text("same")
         for arm in (self.base, self.after):
             (arm / "route.test.mjs").write_text(text)
             (arm / "README.md").write_text(arm.name)
@@ -124,6 +130,46 @@ test('last item',()=>expect(route([3,8])).toBe(existsSync(new URL('./use-last.tx
         self.assertIn("HOLD", strict)
         self.assertIn("Original tests: unavailable", strict)
         self.assertNotIn("VERIFIED REPAIR", strict)
+
+    def test_contained_doc_links_and_unscoped_outer_file(self):
+        for arm in (self.base, self.after):
+            (arm / "docs").mkdir()
+            (arm / "docs/guide.md").write_text("local documentation")
+            (arm / "docs/other.md").write_text("other document")
+            (arm / "guide.md").symlink_to("docs/guide.md")
+            (arm / "guides").symlink_to("docs", target_is_directory=True)
+            self.git(arm, "add", "docs", "guide.md", "guides")
+        self.assertIn("Original tests (replayed): 1/2 passed", self.review(100))
+        (self.after / "guide.md").unlink()
+        (self.after / "guide.md").symlink_to("docs/other.md")
+        self.assertIn("Original tests: unavailable", self.review(1))
+        outer = self.root / "outside-private-fixture.txt"
+        outer.write_text("never include this file")
+        (self.after / "guide.md").unlink()
+        (self.after / "guide.md").symlink_to("../outside-private-fixture.txt")
+        output = self.review(1)
+        self.assertIn("Original tests: unavailable", output)
+        self.assertNotIn(outer.read_text(), output)
+        self.assertNotIn("Original tests (replayed)", output)
+
+    def test_nested_package_with_parent_fixture_is_not_silently_reconstructed(self):
+        for arm in (self.base, self.after):
+            sub = arm / "service"
+            sub.mkdir()
+            (sub / "package.json").write_text('{"private":true,"type":"module"}')
+            (sub / "node_modules").symlink_to(MODULES, target_is_directory=True)
+            (sub / "route.mjs").write_text(BAD)
+            (arm / "use-original.txt").write_text("original rule")
+            case = ("import {test,expect} from 'vitest'; import {existsSync} from 'node:fs'; "
+                    "import {route} from './route.mjs'; test('last',()=>expect(route([3,8]))"
+                    ".toBe(existsSync(new URL('../use-original.txt',import.meta.url))?8:3));")
+            (sub / "route.test.mjs").write_text(case if arm == self.base else case.replace("?8:3", "?3:3"))
+            self.git(arm, "add", "use-original.txt", "service/package.json", "service/route.test.mjs", "service/route.mjs")
+        self.base = self.base / "service"
+        self.after = self.after / "service"
+        output = self.review(1)
+        self.assertIn("select the Git worktree root", output)
+        self.assertNotIn("Original tests (replayed)", output)
 
     def test_ignored_inputs_and_missing_controls_fail_closed_without_printing_private_data(self):
         hidden = self.after / "cache"
