@@ -1,4 +1,5 @@
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -32,6 +33,35 @@ class PythonRelease(unittest.TestCase):
             self.assertEqual((result.testsRun, len(result.failures), len(result.errors)), (6, int(broken), 0))
             if broken:
                 self.assertIn("late-index (trial 2/3)", str(result.failures[0][0]))
+
+    def test_upgrade_uses_edited_cases_and_the_installed_runner(self):
+        target = "./test_tokensand_first.py"
+        documented = [
+            (ROOT / "README.md", f"python3 -m tokensand_check --offline-workflow {target}"),
+            (SCRIPT.parents[1] / "SKILL.md", f'python3 "$SKILL_DIR/scripts/check_workflow.py" --offline-workflow {target}'),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            edited = project / "test_tokensand_first.py"
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.8-py3-none-any.whl") as old:
+                source = old.read("tokensand_check_starter.py").decode()
+            marker = 'if __name__ == "__main__":'
+            adapter = ("async def fetch(item): return item\n"
+                       "workflow.update(candidate=fetch, evaluate=lambda *args: {'planned_calls': True})\n")
+            self.assertEqual(source.count(marker), 1)
+            edited.write_text(source.replace(marker, adapter + marker))
+            original = edited.read_bytes()
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.9-py3-none-any.whl") as current:
+                current.extractall(project / "wheel")
+            for guide, command in documented:
+                with self.subTest(guide=guide.name):
+                    self.assertIn(command, guide.read_text())
+                    args = [arg.replace("$SKILL_DIR", str(SCRIPT.parents[1])) for arg in shlex.split(command)[1:]]
+                    run = subprocess.run([sys.executable, *args], cwd=project, capture_output=True, text=True,
+                                         env={**os.environ, "PYTHONPATH": str(project / "wheel")})
+                    self.assertEqual(run.returncode, 1, run.stderr)
+                    self.assertEqual(run.stderr.count("TypeError: candidate returned an unfinished async result"), 3)
+                    self.assertEqual(edited.read_bytes(), original)
 
     def test_shipped_runner(self):
         with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.9-py3-none-any.whl") as wheel:
