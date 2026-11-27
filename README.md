@@ -50,6 +50,8 @@ To check a repair in your repo, ask your agent: “Check this change against the
 
 ### Review a release with a teammate
 
+To diagnose a **hosted** run, open its private result, expand **Frozen test and trial details**, and choose **View saved outputs** for the affected trial. The two columns show what the app chose to save for each version. If capture was off, the original values are unavailable. A local replay gives you a fresh observation.
+
 Use the same pinned private Node SDK for both runs. The reviewer recognizes 0.7.7 and 0.7.8. From a clean candidate checkout, choose the earlier release tag and its saved run. Declare the app code in `sourceFiles`. If the scorer changed, the reviewer flags the saved result for review.
 
 ```sh
