@@ -16,7 +16,7 @@ In a new agent session, open the repository and ask for a check.
 
 The agent runs your existing offline workflow tests and names the failing cases. Local checks need no Tokens& account or provider key. If your project has no covering test yet, start with [a local example](https://tokensand.com/agents/install#first-local-check).
 
-For a single-repository install, omit `--global` and run the install command from that repository. Choose just one host by passing `--agent codex` or `--agent claude-code`.
+For a single repository, run the same command there without `--global`. To update an existing project copy, run `npx --yes skills@1.9.0 update tokensand-agent-pack --project --yes` from that repository. For a global copy, rerun the global install command. Choose one host with `--agent codex` or `--agent claude-code`.
 
 ## Install automatic workflow checks
 
@@ -74,7 +74,7 @@ To diagnose a **hosted** run, open its private result and choose **Frozen test a
 node "$HOME/.agents/skills/tokensand-agent-pack/scripts/inspect_hosted_trial.mjs" RUN_DIRECTORY --result PRIVATE_RESULT_URL_OR_UUID --case CASE_ID --trial 1
 ```
 
-This reads the original local journals and shows both versions’ recorded checks, workflow duration and tool timings. Add `--field stock` or `--field /cursors/east` to see one known non-sensitive scalar. A pointer such as `/items/0/count` selects an array element. Long or sensitive text is omitted. If the plan is elsewhere, add `--plan PATH_TO_PLAN_JSON`. The command matches the saved trial metadata locally. The selected value comes from the journal on disk. Successful tool calls alone cannot identify which call caused a wrong answer. A rerun gives you a new observation.
+For a project-local install, use `.agents/skills/tokensand-agent-pack/scripts/inspect_hosted_trial.mjs` from the repository root. This reads the original local journals and shows both versions’ recorded checks, workflow duration and tool timings. Add `--field stock` or `--field /cursors/east` to see one known non-sensitive scalar. A pointer such as `/items/0/count` selects an array element. Long or sensitive text is omitted. If the plan is elsewhere, add `--plan PATH_TO_PLAN_JSON`. The command matches the saved trial metadata locally. The selected value comes from the journal on disk. Successful tool calls alone cannot identify which call caused a wrong answer. A rerun gives you a new observation.
 
 Use the same pinned private Node SDK for both runs. The reviewer recognizes 0.7.7 and 0.7.8. From a clean candidate checkout, choose the earlier release tag and its saved run. Declare the app code in `sourceFiles`. If the scorer changed, the reviewer flags the saved result for review.
 
