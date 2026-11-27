@@ -1,4 +1,5 @@
 // From the consuming service: node --import /absolute/path/to/this-file.mjs app.mjs
+import { AsyncLocalStorage } from "node:async_hooks";
 import { closeSync, chmodSync, fchmodSync, mkdtempSync, openSync, readFileSync, writeSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -46,7 +47,7 @@ function toolLabel(value, groupId, callId) {
     ? value : "[unnamed]";
 }
 
-function recorder(fields) {
+function recorder(fields, controller) {
   const active = new Map();
   const closed = new Set();
   let total = 0, generations = 0, written = 0, omitted = 0;
@@ -78,16 +79,26 @@ function recorder(fields) {
     return validId(id) ? id : undefined;
   }
 
+  function miss(group, count = 1) {
+    omitted += count;
+    if (group?.trial?.open) group.trial.omitted += count;
+  }
+
   function toolEvent(event, start) {
     const groupId = eventId(event);
     const group = active.get(groupId);
-    if (!group || group.collision) { omitted++; return; }
+    if (!group || group.collision) {
+      if (!controller.scopedOnly || group?.trial?.open) miss(group);
+      return;
+    }
+    if (controller.scopedOnly && !group.trial) return;
+    if (group.trial && controller.scopes.getStore() !== group.trial) { miss(group); return; }
     const tool = own(event, "toolCall"), id = own(tool, "toolCallId");
-    if (!validId(id)) { omitted++; return; }
+    if (!validId(id)) { miss(group); return; }
     const label = toolLabel(own(tool, "toolName"), groupId, id);
     const previous = group.calls.get(id);
     if (!group.calls.has(id)) {
-      if (total >= maxCalls) { omitted++; return; }
+      if (total >= maxCalls) { miss(group); return; }
       total++;
       group.number ??= ++generations;
       group.calls.set(id, start ? {
@@ -95,19 +106,19 @@ function recorder(fields) {
         allowValue: group.allowValue && own(event, "recordOutputs") !== false,
         allowInput: group.allowInput && own(event, "recordInputs") !== false,
       } : null);
-      if (!start) omitted++;
+      if (!start) miss(group);
       return;
     }
     // Reused IDs, unmatched ends, and conflicting names cannot prove attribution.
     if (start || !previous || previous.row || previous.tool !== label || label === "[unnamed]") {
       group.calls.set(id, null);
-      omitted++;
+      miss(group);
       return;
     }
     // This is the framework execute return, before any tool.toModelOutput conversion.
     const envelope = own(event, "toolOutput");
     const kind = own(envelope, "type");
-    if (kind !== "tool-result" && kind !== "tool-error") { group.calls.set(id, null); omitted++; return; }
+    if (kind !== "tool-result" && kind !== "tool-error") { group.calls.set(id, null); miss(group); return; }
     const duration = own(event, "toolExecutionMs");
     const row = {
       generation: group.number, startOrder: previous.startOrder, finishOrder: ++group.finishes,
@@ -124,7 +135,8 @@ function recorder(fields) {
 
   function modelExchange(event, startingModelCall) {
     const group = active.get(eventId(event));
-    if (!group || group.collision) return;
+    if (!group || group.collision || (controller.scopedOnly && !group.trial) ||
+        (group.trial && controller.scopes.getStore() !== group.trial)) return;
     const priorStep = group.step;
     if (startingModelCall) group.step++;
     if (!group.calls.size || !group.allowInput || !group.allowValue ||
@@ -175,36 +187,60 @@ function recorder(fields) {
     }
   }
 
-  function finish(id) {
+  function finish(id, atExit = false) {
     const group = active.get(id);
     if (!group) return;
+    if (!atExit && group.trial && controller.scopes.getStore() !== group.trial) { miss(group); return; }
     active.delete(id);
+    if (controller.scopedOnly && !group.trial) return;
     if (!group.calls.size && !group.collision) return;
     // A collided identifier stays unusable even if its first generation ended without tools.
     if (closed.size < maxCalls * 2) closed.add(id);
-    if (group.collision) { omitted += group.calls.size; return; }
+    if (group.collision) { miss(group, Math.max(1, group.calls.size)); return; }
     for (const entry of group.calls.values()) {
-      if (entry?.row) save(entry.row);
-      else if (entry) omitted++;
+      if (!entry?.row) { if (entry) miss(group); continue; }
+      const row = entry.row;
+      if (group.trial) {
+        if (!group.trial.open || atExit) continue;
+        if (group.trial.number !== undefined) row.trial = group.trial.number;
+        group.trial.observe(row);
+      }
+      save(row);
     }
   }
 
+  controller.endTrial = trial => {
+    for (const [id, group] of active) {
+      if (group.trial !== trial) continue;
+      // Async work that outlives its candidate has no verified final exchange.
+      miss(group, Math.max(1, group.calls.size));
+      active.delete(id);
+      if (closed.size < maxCalls * 2) closed.add(id);
+    }
+  };
+
   process.once("exit", () => {
-    for (const id of active.keys()) finish(id);
+    for (const id of active.keys()) finish(id, true);
     if (descriptor !== undefined) { try { closeSync(descriptor); } catch {} }
-    if (!written) message("0 matched tool calls. Continue with the existing check. Disabled or locally overridden telemetry has no global coverage.");
-    if (omitted) message("Some tool events were incomplete, ambiguous or over the capture limit.");
+    if (!controller.scopedOnly && !written) message("0 matched tool calls. Continue with the existing check. Disabled or locally overridden telemetry has no global coverage.");
+    if (!controller.scopedOnly && omitted) message("Some tool events were incomplete, ambiguous or over the capture limit.");
   });
 
   return {
     onStart(event) {
       const id = eventId(event);
-      if (id === undefined || closed.has(id)) return;
-      if (active.has(id)) { active.get(id).collision = true; return; }
-      if (active.size < maxActiveGenerations && total < maxCalls && closed.size < maxCalls * 2) {
-        active.set(id, { calls: new Map(), starts: 0, finishes: 0, step: 0,
-          allowInput: own(event, "recordInputs") !== false, allowValue: own(event, "recordOutputs") !== false });
+      const trial = controller.scopes.getStore();
+      if (id === undefined || closed.has(id)) { if (trial?.open) miss({ trial }); return; }
+      if (active.has(id)) {
+        active.get(id).collision = true;
+        if (trial?.open) miss({ trial });
+        return;
       }
+      if ((controller.scopedOnly || trial) && !trial?.open) return;
+      if (active.size < maxActiveGenerations && total < maxCalls && closed.size < maxCalls * 2) {
+        active.set(id, { trial, calls: new Map(), starts: 0, finishes: 0, step: 0,
+          allowInput: own(event, "recordInputs") !== false, allowValue: own(event, "recordOutputs") !== false });
+      } else if (trial) miss({ trial });
     },
     // Avoid requesting model-call events at all for timing-only traces.
     ...(fields ? {
@@ -219,23 +255,79 @@ function recorder(fields) {
   };
 }
 
-async function install() {
-  if (globalThis[marker] || process.env.TOKENSAND_TOOL_TRACE === "0") return;
+async function install(scopedOnly = false) {
+  if (process.env.TOKENSAND_TOOL_TRACE === "0") return;
+  if (globalThis[marker]) return globalThis[marker];
   const local = createRequire(join(process.cwd(), "package.json"));
   try {
     const pkg = JSON.parse(readFileSync(local.resolve("ai/package.json"), "utf8"));
     if (pkg.name !== "ai" || !/^7\./.test(pkg.version)) throw new Error();
     const { registerTelemetry } = await import(pathToFileURL(local.resolve("ai")).href);
     if (typeof registerTelemetry !== "function") throw new Error();
-    if (globalThis[marker]) return; // Another import may have finished resolving the service SDK.
+    if (globalThis[marker]) return globalThis[marker]; // Another import may have finished resolving the service SDK.
     const selector = process.env.TOKENSAND_TOOL_RESULT_FIELD;
     const fields = selectedPath(selector);
     if (selector !== undefined && fields === undefined) message("Invalid result field. Capturing timing and status only.");
-    registerTelemetry(recorder(fields));
-    globalThis[marker] = true;
+    const controller = { scopes: new AsyncLocalStorage(), scopedOnly, comparison: Boolean(fields) };
+    registerTelemetry(recorder(fields, controller));
+    globalThis[marker] = controller;
+    return controller;
   } catch {
-    message("Requires the service's installed Vercel AI SDK 7 with registerTelemetry. Continue with your existing check without --import.");
+    if (!scopedOnly) message("Requires the service's installed Vercel AI SDK 7 with registerTelemetry. Continue with your existing check without --import.");
   }
 }
 
-await install();
+// The installed checker imports ?trial only for an explicitly selected candidate replay.
+export async function createTrialToolInspector() {
+  const controller = await install(true);
+  const available = Boolean(controller?.scopes);
+  if (available) controller.scopedOnly = true;
+  const comparison = Boolean(controller?.comparison);
+  return {
+    startTrial(number) {
+      const tools = new Map();
+      let observed = 0;
+      const trial = {
+        number: Number.isSafeInteger(number) && number > 0 && number <= 10 ? number : undefined,
+        open: true, omitted: 0,
+        observe(row) {
+          let counts = tools.get(row.tool);
+          if (!counts) {
+            counts = { tool: row.tool, completed: 0, errors: 0, changed: 0, equal: 0, unavailable: 0 };
+            tools.set(row.tool, counts);
+          }
+          observed++;
+          counts.completed++;
+          if (row.status === "error") counts.errors++;
+          else if (comparison) {
+            if (!Object.hasOwn(row, "result") || !Object.hasOwn(row, "modelResult")) counts.unavailable++;
+            else if (row.result === row.modelResult) counts.equal++;
+            else counts.changed++;
+          }
+        },
+      };
+      function seal() {
+        if (!trial.open) return;
+        if (available) controller.endTrial(trial);
+        trial.open = false;
+      }
+      return {
+        async run(callback) {
+          try {
+            const value = available && trial.open ? controller.scopes.run(trial, callback) : callback();
+            // Close synchronous candidates before any detached microtasks they scheduled run.
+            if (value != null && (typeof value === "object" || typeof value === "function")
+                && (types.isProxy(value) || "then" in value)) return await value;
+            return value;
+          } finally { seal(); }
+        },
+        close() {
+          seal();
+          return { available, comparison, observed, omitted: trial.omitted, tools: [...tools.values()] };
+        },
+      };
+    },
+  };
+}
+
+if (new URL(import.meta.url).search !== "?trial") await install();
