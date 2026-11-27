@@ -72,6 +72,33 @@ class NativeReview(unittest.TestCase):
         self.assertIn("pass", result)
         self.assertIn("test_retry", result)
 
+    def test_named_case_with_replaced_input_cannot_verify_a_repair(self):
+        test = ("import pytest\nfrom worker import deliveries, sample\n"
+                "@pytest.mark.parametrize('events', [sample()], ids=['PRIVATE_order'])\n"
+                "def test_delivery(events):\n    assert deliveries(events) == ['PRIVATE_event']\n")
+        for root in (self.before, self.after):
+            (root / "test_worker.py").write_text(test)
+        original = "def sample(): return ['PRIVATE_event', 'PRIVATE_event']\n"
+        easier = "def sample(): return ['PRIVATE_event']\n"
+        broken = "def deliveries(events): return list(events)\n"
+        fixed = "def deliveries(events): return list(dict.fromkeys(events))\n"
+        (self.before / "worker.py").write_text(original + broken)
+        (self.after / "worker.py").write_text(easier + broken)
+        held = self.review(100, "test_worker.py")
+        self.assertIn("test coverage changed", held)
+        self.assertNotIn("(recovered)", held)
+        (self.after / "worker.py").write_text(original + fixed)
+        self.assertIn("(recovered)", self.review(0, "test_worker.py"))
+
+    def test_opaque_parameters_hold_without_repr(self):
+        test = ("import pytest\nfrom worker import deliveries\n"
+                "class Arg:\n    def __repr__(self): raise RuntimeError('PRIVATE_repr')\n"
+                "@pytest.mark.parametrize('event', [Arg()], ids=['PRIVATE_object'])\n"
+                "def test_delivery(event):\n    assert deliveries([1, 1]) == [1]\n")
+        for root in (self.before, self.after):
+            (root / "test_worker.py").write_text(test)
+        self.assertIn("unsupported", self.review(100, "test_worker.py"))
+
     def test_weakened_assertion_holds_an_apparent_repair(self):
         self.worker(self.after, fixed=False)
         (self.after / "test_worker.py").write_text(TEST.replace("== [event]", "!= []"))
