@@ -47,6 +47,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
       options: {
         "offline-workflow": { type: "string", multiple: true }, case: { type: "string", multiple: true },
         "compare-baseline": { type: "boolean" },
+        "require-case": { type: "string", multiple: true }, "require-check": { type: "string", multiple: true },
         "inspect-values": { type: "boolean" }, "inspect-tools": { type: "boolean" }, "require-hosted-labels": { type: "boolean" },
       },
     }));
@@ -56,11 +57,20 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   const { "offline-workflow": paths = [], case: caseIds = [], "inspect-values": inspectValues, "inspect-tools": inspectTools, "require-hosted-labels": requireHostedLabels } = values;
   if (paths.length > 1) invalidSelection("Use --offline-workflow once. Run each workflow in a separate command.");
   const [adapter] = paths;
+  const requiredCases = values["require-case"] ?? [], requiredChecks = values["require-check"] ?? [];
+  if (requiredCases.length || requiredChecks.length) {
+    if (!pairArm && !values["compare-baseline"]) invalidSelection("Use --require-case and --require-check with --compare-baseline.");
+    if ([requiredCases, requiredChecks].some(ids => new Set(ids).size !== ids.length || ids.some(id => !id.trim() || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(id)))) {
+      invalidSelection("Provide each required case or check ID once, with a nonempty, single-line ID.");
+    }
+    const excluded = requiredCases.findIndex(id => caseIds.length && !caseIds.includes(id));
+    if (excluded >= 0) invalidSelection("Required case " + pairedId(requiredCases[excluded], excluded) + " is outside --case selection. Remove --case to run the full suite or include that case.");
+  }
   if (values["compare-baseline"]) {
     if (!adapter || inspectTools || inspectValues || requireHostedLabels || pairArm) {
       invalidSelection("Use --compare-baseline with --offline-workflow PATH and optional --case IDs. Run inspection or hosted label checks separately.");
     }
-    process.exit(await compareLocalArms(adapter, caseIds));
+    process.exit(await compareLocalArms(adapter, caseIds, requiredCases, requiredChecks));
   }
   if (adapter === "" || caseIds.includes("")) invalidSelection("Supply a workflow path or case ID after its option.");
   if (new Set(caseIds).size !== caseIds.length) invalidSelection("A --case ID was requested more than once. List each ID once.");
@@ -109,6 +119,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     if (!["baseline", "candidate"].includes(pairArm) || ["baseline", "candidate"].some(arm =>
       selected.maxCallsPerRun?.[arm] !== 0 || typeof selected[arm] !== "function") || typeof selected.evaluate !== "function") {
       invalidSelection("Both callbacks, one evaluator and two zero provider budgets are required.");
+    }
+    if (Array.isArray(selected.cases) && Array.isArray(selected.checks)) {
+      const missing = (ids, entries) => ids.filter(id => !entries.some(entry => entry?.id === id));
+      const cases = missing([...new Set([...caseIds, ...requiredCases])], selected.cases);
+      const checks = missing(requiredChecks, selected.checks);
+      if (cases.length || checks.length) {
+        await new Promise(resolve => process.send({ type: "missing-coverage", cases, checks }, resolve));
+        process.exit(2);
+      }
     }
     if (![selected.cases, selected.checks].every(entries => Array.isArray(entries) && entries.length &&
       entries.every(entry => typeof entry?.id === "string" && entry.id.length) &&
@@ -469,14 +488,22 @@ async function declaredCriteriaDigest(adapter, paths = [], importStarted) {
   return digest.digest("hex");
 }
 
-async function runLocalArm(adapter, ids, arm) {
+function pairedId(id, index) {
+  return id.length <= 120 && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(id) &&
+    !/(?:^|[^a-z0-9])(?:sk[-_]|tobs_|dai_|tvly-)/i.test(id) ? JSON.stringify(id) : "#" + (index + 1);
+}
+
+async function runLocalArm(adapter, ids, requiredCases, requiredChecks, arm) {
   const { fork } = await import("node:child_process");
-  const child = fork(process.argv[1], ["--_paired-arm", arm, "--offline-workflow", adapter, ...ids.map(id => "--case=" + id)], {
+  const options = [...ids.map(id => "--case=" + id), ...requiredCases.map(id => "--require-case=" + id),
+    ...requiredChecks.map(id => "--require-check=" + id)];
+  const child = fork(process.argv[1], ["--_paired-arm", arm, "--offline-workflow", adapter, ...options], {
     execArgv: [], stdio: ["ignore", "ignore", "ignore", "ipc"],
   });
   return new Promise(resolve => {
     let matrix, timer, timedOut = false, finished = false, active, invalid = false, criteriaUnavailable = false;
     const scores = new Map();
+    let missingCoverage;
     function deadline(ms) {
       clearTimeout(timer);
       timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, ms);
@@ -495,6 +522,12 @@ async function runLocalArm(adapter, ids, arm) {
         const key = JSON.stringify([msg.id, msg.repetition]);
         if (active !== key || scores.has(key)) invalid = true;
         else scores.set(key, msg.scores);
+      } else if (msg.type === "missing-coverage" && !matrix && Array.isArray(msg.cases) && Array.isArray(msg.checks)) {
+        // Only echo the caller's requirements, never a worker-supplied label.
+        missingCoverage = {
+          cases: [...new Set([...ids, ...requiredCases])].filter(id => msg.cases.includes(id)),
+          checks: requiredChecks.filter(id => msg.checks.includes(id)),
+        };
       } else if (msg.type === "criteria-unavailable") {
         criteriaUnavailable = true;
       } else if (msg.type === "done") {
@@ -511,7 +544,9 @@ async function runLocalArm(adapter, ids, arm) {
       const reportedFailure = matrix && (scores.size < matrix.cases.length * matrix.trials ||
         [...scores.values()].some(values => values.some(value => value !== true)));
       const normal = finished && (code === 0 || code === 1 && reportedFailure);
-      if (criteriaUnavailable || (timedOut && !finished && matrix?.declaredCriteria)) {
+      if (missingCoverage && code === 2 && !matrix && !invalid && (missingCoverage.cases.length || missingCoverage.checks.length)) {
+        resolve({ missingCoverage });
+      } else if (criteriaUnavailable || (timedOut && !finished && matrix?.declaredCriteria)) {
         resolve({ criteriaUnavailable: true });
       } else if (!matrix || invalid || !(normal || timedOut && active && !finished)) {
         resolve(null);
@@ -522,7 +557,7 @@ async function runLocalArm(adapter, ids, arm) {
   });
 }
 
-async function compareLocalArms(adapter, ids) {
+async function compareLocalArms(adapter, ids, requiredCases, requiredChecks) {
   const { createHash } = await import("node:crypto");
   const { readFile } = await import("node:fs/promises");
   const hash = async () => createHash("sha256").update(await readFile(adapter)).digest("hex");
@@ -530,7 +565,14 @@ async function compareLocalArms(adapter, ids) {
   try {
     const original = await hash();
     for (const arm of ["baseline", "candidate"]) {
-      const result = await runLocalArm(adapter, ids, arm);
+      const result = await runLocalArm(adapter, ids, requiredCases, requiredChecks, arm);
+      if (result?.missingCoverage) {
+        for (const [kind, missing] of Object.entries(result.missingCoverage)) {
+          if (missing.length) console.error("Missing required " + kind + ": " + missing.map(pairedId).join(", "));
+        }
+        console.error("Restore the missing coverage in the workflow and rerun with the same requirements.");
+        return 2;
+      }
       if (result?.criteriaUnavailable) {
         console.error("Declared evaluator files changed or could not be verified. Check evaluatorSourceFiles in the service directory, keep the criteria fixed and rerun.");
         return 2;
@@ -555,8 +597,6 @@ async function compareLocalArms(adapter, ids) {
     return 2;
   }
   const {cases, checks, trials} = before.matrix;
-  const safeId = (id, index) => id.length <= 120 && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(id) &&
-    !/(?:^|[^a-z0-9])(?:sk[-_]|tobs_|dai_|tvly-)/i.test(id) ? JSON.stringify(id) : "#" + (index + 1);
   let failed = false, incomplete = false, newFailure = false;
   console.log("Baseline and candidate on the same cases and checks");
   for (const [ci, [id]] of cases.entries()) {
@@ -582,7 +622,7 @@ async function compareLocalArms(adapter, ids) {
         groups.get(transition).push(trial + 1);
       }
       for (const [transition, numbers] of groups) {
-        console.log(`${transition}: ${safeId(id, ci)} / ${safeId(check, index)} · trials ${numbers.join(", ")}`);
+        console.log(`${transition}: ${pairedId(id, ci)} / ${pairedId(check, index)} · trials ${numbers.join(", ")}`);
       }
     }
   }

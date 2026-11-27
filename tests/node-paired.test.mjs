@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -104,5 +104,69 @@ export default {maxCallsPerRun:{baseline:0,candidate:0},evaluatorSourceFiles:[${
     assert.equal(child.status,kind==='stable'?1:2,kind+' '+child.stdout+child.stderr);
     if (kind==='stable') assert.match(child.stdout,/Existing failure: "receipt" \/ "amount"/);
     else {assert.match(child.stderr,/evaluator files/i);assert.doesNotMatch(child.stdout+child.stderr,/expected=10|Recovered:|Passed both:/);}
+  }
+});
+
+test('mandatory case and check IDs keep the full suite and ordinary repetition count', t => {
+  const fixture = `cases:[{id:'picked',input:'ok'},{id:'other',input:'wrong'}],
+    checks:[{id:'stock'},{id:'other-rule'}],
+    baseline:input=>input,candidate:input=>input,
+    evaluate:({output})=>({stock:true,'other-rule':output==='ok'})`;
+  const all = run(t,fixture,['--compare-baseline','--require-case=picked','--require-check=stock']);
+  assert.equal(all.code,1,all.text);
+  assert.match(all.text,/Existing failure: "other" \/ "other-rule" · trials 1\n/);
+  const focused = run(t,fixture,['--compare-baseline','--case=picked','--require-case=picked','--require-check=stock']);
+  assert.equal(focused.code,0,focused.text);
+  assert.match(focused.text,/Passed both: "picked" \/ "other-rule" · trials 1, 2, 3/);
+  assert.doesNotMatch(focused.text,/"other" \//);
+});
+
+test('missing required coverage holds before callbacks and names only safe caller IDs', t => {
+  const dir=mkdtempSync(join(tmpdir(),'coverage-callback-'));
+  t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const marker=join(dir,'ran');
+  const fn=`async()=>{(await import('node:fs')).writeFileSync(${JSON.stringify(marker)},'ran');return 1}`;
+  const fixture=`baseline:${fn},candidate:${fn}`;
+  const cases=[
+    {fields:fixture, flags:['--require-check=removed','--require-case=missing-invoice'],
+      expected:[/Missing required cases: "missing-invoice"/,/Missing required checks: "removed"/]},
+    {fields:fixture, flags:['--require-check=removed','--require-check=sk-example-private'],
+      expected:[/Missing required checks: "removed", #2/]},
+    {fields:fixture+',cases:[],checks:[]', flags:['--require-case=picked','--require-check=stock'],
+      expected:[/Missing required cases: "picked"/,/Missing required checks: "stock"/]},
+    {fields:fixture, flags:['--case=picked','--require-case=other'],expected:[/Required case "other" is outside --case selection/]},
+    {fields:fixture, flags:['--case=removed'],expected:[/Missing required cases: "removed"/]}
+  ];
+  for(const {fields,flags,expected} of cases){
+    const result=run(t,fields,['--compare-baseline',...flags]);
+    assert.equal(result.code,2,result.text);
+    for(const pattern of expected)assert.match(result.text,pattern);
+    assert.doesNotMatch(result.text,/sk-example-private|Recovered:|Passed both:|New failures:/);
+    assert.equal(existsSync(marker),false);
+  }
+});
+
+test('required covered failures and unscored checks preserve the paired exit contract', t => {
+  const got=run(t,`evaluate:()=>({stock:false,missing:undefined})`,
+    ['--compare-baseline','--require-case=picked','--require-check=stock','--require-check=missing']);
+  assert.equal(got.code,1,got.text);
+  assert.match(got.text,/Existing failure: "picked" \/ "stock"/);
+  assert.match(got.text,/Unscored .*"picked" \/ "missing"/);
+  assert.match(got.text,/undetermined/);
+});
+
+test('rejects duplicate and malformed policy arguments and accidental use outside paired checks', t => {
+  const options=[
+    ['--compare-baseline','--require-case=picked','--require-case=picked'],
+    ['--compare-baseline','--require-check=stock','--require-check=stock'],
+    ['--compare-baseline','--require-check='],
+    ['--compare-baseline','--require-case=  '],
+    ['--compare-baseline','--require-check=bad\nprivate-label'],
+    ['--require-check=stock'], ['--require-case=picked']
+  ];
+  for(const flags of options){
+    const got=run(t,'',flags);
+    assert.equal(got.code,2,got.text);
+    assert.doesNotMatch(got.text,/private-label|Recovered:|Passed both:|New failures:/);
   }
 });
