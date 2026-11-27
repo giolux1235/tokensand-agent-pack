@@ -12,10 +12,39 @@ SCRIPT = ROOT / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/script
 
 
 class PythonRelease(unittest.TestCase):
+    def test_paired_check_runs_with_all_file_writes_denied(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            # Install a write guard in the CLI and every Python subprocess on all platforms.
+            (root / "sitecustomize.py").write_text("""
+import os, sys
+def read_only(event, args):
+    if event == "open":
+        path, _, flags = args
+        if isinstance(path, (str, bytes)) and os.fsdecode(path) != os.devnull:
+            if flags & (os.O_CREAT | os.O_TRUNC | os.O_RDWR | os.O_WRONLY):
+                raise PermissionError("Read-only test checkout")
+    if event in ("os.mkdir", "tempfile.mkstemp", "tempfile.mkdtemp"):
+        raise PermissionError("Read-only test checkout")
+sys.addaudithook(read_only)
+""")
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.13-py3-none-any.whl") as wheel:
+                wheel.extractall(root / "installed")
+            for command in ([sys.executable, str(SCRIPT)], [sys.executable, "-m", "tokensand_check"]):
+                with self.subTest(command=command[-1]):
+                    run = subprocess.run(
+                        [*command, "--compare-baseline", "--offline-workflow", str(ROOT / "examples/incremental-sync.py")],
+                        cwd=root, capture_output=True, text=True, timeout=10,
+                        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "FIX_CURSOR": "1",
+                             "PYTHONPATH": os.pathsep.join((str(root), str(root / "installed")))},
+                    )
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    self.assertIn('Passed both: "resume-tied-page" / "complete"', run.stderr)
+
     def test_installed_and_standalone_runners_match_the_same_baseline(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.12-py3-none-any.whl") as wheel:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.13-py3-none-any.whl") as wheel:
                 self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
                 wheel.extractall(root / "package")
             adapter = ROOT / "examples/incremental-sync.py"
@@ -98,7 +127,7 @@ workflow = {
             self.assertEqual(source.count(marker), 1)
             edited.write_text(source.replace(marker, adapter + marker))
             original = edited.read_bytes()
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.12-py3-none-any.whl") as current:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.13-py3-none-any.whl") as current:
                 current.extractall(project / "wheel")
             for guide, command in documented:
                 with self.subTest(guide=guide.name):
@@ -111,7 +140,7 @@ workflow = {
                     self.assertEqual(edited.read_bytes(), original)
 
     def test_shipped_runner(self):
-        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.12-py3-none-any.whl") as wheel:
+        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.13-py3-none-any.whl") as wheel:
             self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
         for repair, outage, code, message in [
             ("0", "0", 1, "Failed checks: Return every remaining record"),

@@ -5,6 +5,7 @@ from collections.abc import AsyncIterable
 import hashlib
 import inspect
 import json
+import os
 import reprlib
 import tempfile
 from pathlib import Path
@@ -207,7 +208,7 @@ def load_workflow(path):
     return runpy.run_path(str(path))["workflow"]
 
 
-def write_variant_scores(variant, destination, workflow_path, *selected):
+def variant_scores(variant, workflow_path, *selected):
     original = load_workflow(workflow_path)
     # Capture the declared test matrix before application callbacks can mutate it.
     definition = dict(original, cases=copy.deepcopy(list(original["cases"])),
@@ -225,8 +226,56 @@ def write_variant_scores(variant, destination, workflow_path, *selected):
     result = suite.run(unittest.TestResult())
     if not rows or result.testsRun != len(rows):
         raise ValueError("No complete test matrix was executed.")
-    with Path(destination).open("x") as receipt:
-        json.dump({"checks": [c["id"] for c in definition["checks"]], "rows": rows}, receipt)
+    return {"checks": [c["id"] for c in definition["checks"]], "rows": rows}
+
+
+def send_variant_scores(variant, workflow_path, *selected):
+    # Keep the control pipe private before importing the trusted app. Direct fd
+    # writes and child processes see the same null stdout/stderr as in 0.1.12.
+    with os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8") as receipt:
+        os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+        scores = variant_scores(variant, workflow_path, *selected)
+        json.dump(scores, receipt, separators=(",", ":"), allow_nan=False)
+    return 0
+
+
+def valid_variant_scores(record):
+    if not isinstance(record, dict) or set(record) != {"checks", "rows"}:
+        return False
+    checks, rows = record["checks"], record["rows"]
+    if (not isinstance(checks, list) or not checks or not all(isinstance(c, str) and c for c in checks)
+            or len(checks) != len(set(checks)) or not isinstance(rows, list) or not rows):
+        return False
+    seen = set()
+    for row in rows:
+        if not isinstance(row, list) or len(row) != 4:
+            return False
+        case, trial, fingerprint, values = row
+        if (not isinstance(case, str) or not case or type(trial) is not int or not 1 <= trial <= 10
+                or (case, trial) in seen or not isinstance(fingerprint, str) or len(fingerprint) != 64
+                or any(char not in "0123456789abcdef" for char in fingerprint)
+                or not isinstance(values, list) or len(values) != len(checks)
+                or not all(value is None or type(value) is bool for value in values)):
+            return False
+        seen.add((case, trial))
+    return True
+
+
+def read_variant_scores(command, timeout=None):
+    # communicate() drains the pipe while the worker runs, including matrices
+    # larger than the OS pipe buffer. The CLI keeps the caller's time budget.
+    result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, timeout=timeout)
+    if result.returncode:
+        raise ValueError("Check the adapter defines both workflows, an evaluator, unique case/check IDs "
+                         "and JSON inputs. Check any --case ID or run the ordinary check for setup details.")
+    try:
+        record = json.loads(result.stdout)
+    except (ValueError, RecursionError):
+        record = None
+    if not valid_variant_scores(record):
+        raise ValueError("The worker returned an invalid score receipt. Run the ordinary check for details.")
+    return record
 
 
 def compare_baseline(workflow_path, selected):
@@ -237,21 +286,19 @@ def compare_baseline(workflow_path, selected):
         return 2
     initial_hash = hashlib.sha256(workflow_path.read_bytes()).digest()
     records = []
-    with tempfile.TemporaryDirectory() as directory:
-        for variant in ("baseline", "candidate"):
-            path = Path(directory) / variant
-            run = subprocess.run(
-                [sys.executable, __file__, "--_variant-scores", variant, str(path), str(workflow_path), *selected],
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            if run.returncode or not path.is_file():
-                print(f"Could not score the {variant}. Check the adapter defines both workflows, an evaluator, unique case/check IDs "
-                      "and JSON inputs. Check any --case ID or run the ordinary check for setup details.", file=sys.stderr)
-                return 2
-            if not workflow_path.is_file() or hashlib.sha256(workflow_path.read_bytes()).digest() != initial_hash:
-                print("The workflow adapter changed during the check. Save it and rerun.", file=sys.stderr)
-                return 2
-            records.append(json.loads(path.read_text()))
+    for variant in ("baseline", "candidate"):
+        command = [sys.executable, "-B", __file__, "--_variant-scores", variant, str(workflow_path), *selected]
+        try:
+            records.append(read_variant_scores(command))
+        except OSError:
+            print(f"Could not launch or read the {variant} worker. Check local Python subprocess access.", file=sys.stderr)
+            return 2
+        except ValueError as error:
+            print(f"Could not score the {variant}. {error}", file=sys.stderr)
+            return 2
+        if not workflow_path.is_file() or hashlib.sha256(workflow_path.read_bytes()).digest() != initial_hash:
+            print("The workflow adapter changed during the check. Save it and rerun.", file=sys.stderr)
+            return 2
 
     before, after = records
     if (not before["checks"] or not before["rows"] or before["checks"] != after["checks"]
@@ -292,8 +339,7 @@ def load_tests(loader, tests, pattern):
 
 def main(argv):
     if argv[:1] == ["--_variant-scores"]:
-        write_variant_scores(*argv[1:])
-        return 0
+        return send_variant_scores(*argv[1:])
     parser = argparse.ArgumentParser(description="Run each offline case for its configured repetitions (default: once).")
     parser.add_argument("--offline-workflow", type=Path, action="append", help="Trusted local Python file exporting a workflow dictionary.")
     parser.add_argument("--case", action="append", help="Exact case ID to run at least three times. Repeat --case to select more cases.")
