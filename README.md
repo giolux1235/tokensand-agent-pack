@@ -51,7 +51,7 @@ With the skill installed, give your coding agent the public `tokensand.com/p/…
 
 The agent follows the project’s **Repo** link and tests the edition linked from its page in a separate checkout. If the page has no pinned edition, it reports the revision it ran from the default branch. **Check your own project** starts setup for your own app.
 
-To check a repair in your own repo, ask your agent: “Check this change against the last release. Tell me if a case disappeared, which checks fail, and whether the fix passes.” The agent can replay the original case IDs with the local Node or Python checker. Supply the earlier revision when it would be ambiguous.
+To check a repair in your repo, ask your agent: “Check this change against the last release. Which cases failed, and does the fix pass the original checks?” The agent pins the earlier commit, checks for missing cases and changed pass criteria, and runs the current suite. When running a named case yourself, pass the whole selector as one argument, for example `--case="-expedite / priority (EU)"`.
 
 ### Review a release with a teammate
 
@@ -102,7 +102,7 @@ Save the checker for your language in your repository. Run it with your own trus
 | Download | Command |
 | --- | --- |
 | [Node.js checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.19/tokensand-first.test.mjs) | `node tokensand-first.test.mjs --offline-workflow ./observe.workflow.mjs` |
-| [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.8/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
+| [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.9/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
 
 Set `repetitions` to an integer from 1 to 10 to run every case that many times. Omit it to run each case once. Append `--case ID_A --case ID_B` to repeat only those cases, at least three times each. An ordinary local check exits `0` when its checks pass and `1` on a failed or unscored check. An invalid case selection or repetition count exits `2`. For expected and actual values, select one case with `--case CASE_ID --inspect-values` and open the private file it prints. Delete it after debugging.
 
@@ -127,13 +127,17 @@ For Claude Code, use `.claude/skills` in the same command. You can also [downloa
 In your project’s virtual environment, install the checker and run your trusted local workflow:
 
 ```sh
-python3 -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.8/tokensand_workflow_check-0.1.8-py3-none-any.whl
+python3 -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.9/tokensand_workflow_check-0.1.9-py3-none-any.whl
 python3 -m tokensand_check --offline-workflow ./my_workflow.py
 ```
+
+For an async agent, return its completed output from the synchronous adapter. For example, after importing `asyncio`, use `return asyncio.run(agent.ainvoke(item))` inside `candidate(item)`. Collect streamed replies before scoring them.
 
 Try the [SQLite sync example](examples/incremental-sync.py) as `my_workflow.py`. The initial read passes. Resuming a page drops a record when two timestamps match. Rerun with `FIX_CURSOR=1` to verify the repair. The summary shows how many trials failed and how many lacked a required score. An affected trial can appear in both counts.
 
 ### Check a Lovable project
+
+Reviewing a shared preview? Give the maintainer the failing action and expected result. To replay it in Tokens&, use the [synced repository](https://docs.lovable.dev/integrations/github) and the commit that produced the preview.
 
 Open your [GitHub-synced Lovable project](https://docs.lovable.dev/integrations/github) in Codex or Claude Code. A local check needs no Tokens& account, gateway key or skill install. Copy this request into the agent:
 
