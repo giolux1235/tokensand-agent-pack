@@ -73,22 +73,22 @@ To diagnose a **hosted** run, open its private result, expand **Frozen test and 
 Use the same pinned private Node SDK for both runs. The reviewer recognizes 0.7.7 and 0.7.8. From a clean candidate checkout, choose the earlier release tag and its saved run. Declare the app code in `sourceFiles`. If the scorer changed, the reviewer flags the saved result for review.
 
 ```sh
-npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.24/tokensand-workflow-check-0.1.24.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
+npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.25/tokensand-workflow-check-0.1.25.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
 ```
 
 If the selected case already failed in the earlier release, use the earlier checkout to score the saved outputs with its original checks. Run the same checker with `--review-repair REFERENCE_RUN CANDIDATE_RUN --case CASE_ID --original-checkout EARLIER_SERVICE`. If you only have the saved runs, omit `--original-checkout EARLIER_SERVICE` to compare the recorded scores.
 
 Open `review.html` to see the blocking cases, their scores and both Git revisions. Review the case names before sharing the note. Keep your run directories and private inputs and outputs on your machine.
 
-Save the note as `review.html` in the trusted candidate service checkout with both Git revisions available locally. This command also works with notes created by older checkers.
+Save `review.html` in the trusted candidate checkout. For a release decision, take the accepted Git tag and required case IDs from your team's release checklist. Replace the placeholders below and repeat `--case` for every required ID.
 
 ```sh
-npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.24/tokensand-workflow-check-0.1.24.tgz --recheck-release ./review.html --all-cases --run
+npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.25/tokensand-workflow-check-0.1.25.tgz --recheck-release ./review.html --reference RELEASE_TAG --case=REQUIRED_CASE_1 --case=REQUIRED_CASE_2 --run
 ```
 
-This rechecks each case **in the note** using the earlier scorer. It repeats the recorded 3–10 trials per revision. A case without recorded counts starts with three. If the note covers fewer trials than the committed workflow, regenerate it after a full run. To narrow the selection, replace `--all-cases` with one or more `--case ID` flags. Self-contained workflows need no private SDK or account for replay. For offline use, install the pinned archive once and use `tokensand-check` in place of `npx --yes URL`.
+A missing required case exits `2`. Request a new note covering that case. A verified regression exits `100`. Exit `0` confirms the cases you named passed the earlier scorer.
 
-Release review and replay exit `100` for a verified regression, `2` for inconclusive evidence and `0` when all selected cases pass. Omit `--run` to inspect a received note without executing project code. That preview also exits `2`.
+To review just what a teammate shared, use `--all-cases` in place of the case flags. On a selected note this covers only the cases its author included. Report which cases passed. Omit `--run` to preview the note safely (exit `2`). Replay repeats the recorded 3–10 trials, or three when counts are absent. If the note covers fewer trials than the committed workflow, request a note from a full run. Self-contained workflows need no private SDK or account for replay. For offline use, install the archive once and use `tokensand-check`.
 
 A recorded failure that passes in isolation stays inconclusive. Compare the two pass counts. Replay omits application environment variables, so reproduce the original worker settings. For example, put `{"bufferSize":16}` in the failing case input and have the worker use it. If earlier cases change shared state, rerun the full workflow in its original order.
 
