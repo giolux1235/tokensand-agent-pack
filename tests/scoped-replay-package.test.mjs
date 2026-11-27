@@ -9,7 +9,7 @@ import test from 'node:test';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const pkg = version => join(root, 'packages', `tokensand-workflow-check-${version}.tgz`);
-const latest = '0.1.27';
+const latest = '0.1.28';
 const sha = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 function fixture(t) {
@@ -111,6 +111,7 @@ for (const [version, installedSha] of [
   ['0.1.24', '35d32d550d4b7d226b34b1bc3710f63624bf5bcd49bb65cd6a3a4f6cc08e4ac6'],
   ['0.1.25', 'e80168f21af0b37b274348f27fb6e9a0e50a7287560284f7db813ae2b59151f6'],
   ['0.1.26', '2a8e9f35bc7a988417a88d2b10d0ae6bcc565d6db13df75c3d0227dfb63f47a4'],
+  ['0.1.27', '75e58b67b15379a7696491561f8d0086a9b5b992e29a02bf2f4ecb69036f68af'],
 ]) {
   test('upgrades the unmodified '+version+' runner and protects local edits',t=>{
     const {dir,run,unpack}=fixture(t);
@@ -143,7 +144,7 @@ for (const [version, installedSha] of [
 
 test('packaged checker and preload exactly match the Agent Pack; unaffected release tools keep their bytes',t=>{
   const {unpack}=fixture(t);
-  const old=unpack('0.1.26'), next=unpack(latest);
+  const old=unpack('0.1.27'), next=unpack(latest);
   const scripts=join(root,'plugins/tokensand-agent-pack/skills/tokensand-agent-pack/scripts');
   assert.equal(sha(join(next,'agent-check.mjs')),sha(join(scripts,'check_workflow.mjs')));
   assert.equal(sha(join(next,'trace_ai_sdk_7.mjs')),sha(join(scripts,'trace_ai_sdk_7.mjs')));
@@ -191,4 +192,44 @@ test('recipients replay the frozen checks and reject a modified packaged checker
   const held=replay(['--case','amount'],2);
   assert.equal(held.verdict,'unknown');
   assert.match(held.reason,/matching public workflow checker/);
+});
+
+test('keeps a later deadline replay actionable and bounds commands across trials', t => {
+  const { dir, run, unpack } = fixture(t);
+  const cli = join(unpack(latest), 'cli.mjs');
+  const args = ['--offline-workflow', './observe.workflow.mjs'];
+  const replayIds = text => [...text.matchAll(/^Replay this case: .* --case=(\S+) --inspect-tools$/gm)]
+    .map(match => match[1]);
+  function check(cases) {
+    writeFileSync(join(dir, 'observe.workflow.mjs'), `
+      import { setTimeout as wait } from 'node:timers/promises';
+      export default {
+        cases: ${JSON.stringify(cases)}.map(id => ({id, input:id})),
+        repetitions: 3, maxCallsPerRun: {candidate:0}, timeoutMs:75,
+        checks:[{id:'correct'}], evaluate:({output})=>({correct:output}),
+        async candidate(id,ctx) {
+          if (id.startsWith('late')) {
+            await ctx.tool('lookup', () => wait(180, undefined, {signal:ctx.signal}));
+          } else if (id === 'sync') {
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 130);
+          }
+          return id !== 'wrong';
+        },
+      };`);
+    const result = run(process.execPath, [cli, ...args]);
+    assert.equal(result.status, 1, result.text);
+    return result.text;
+  }
+
+  const mixed = check(['wrong', 'late', 'late-second']);
+  assert.deepEqual(replayIds(mixed), ['wrong', 'late']);
+  assert.match(mixed, /0 passed, 9 failed/);
+  const copied = mixed.split('\n').find(line => line.startsWith('Replay this case: ') && line.includes(' --case=late '));
+  const replay = run('sh', ['-c', copied.slice('Replay this case: '.length)]);
+  assert.equal(replay.status, 1, replay.text);
+  assert.equal((replay.text.match(/lookup — still running/g) || []).length, 3);
+  assert.deepEqual(replayIds(replay.text), []);
+  assert.deepEqual(replayIds(check(['wrong', 'sync'])), ['wrong', 'sync']);
+  assert.deepEqual(replayIds(check(['late', 'late-second'])), ['late', 'late-second']);
+  assert.deepEqual(replayIds(check(['late'])), ['late']);
 });
