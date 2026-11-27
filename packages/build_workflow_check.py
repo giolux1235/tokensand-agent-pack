@@ -1,0 +1,131 @@
+"""Build the v0.1.25 public package and optional standalone release assets offline.
+
+python3 packages/build_workflow_check.py --esbuild /path/to/esbuild --assets /new/assets
+"""
+import argparse
+import gzip
+import hashlib
+import io
+import json
+from pathlib import Path
+import subprocess
+import tarfile
+
+HERE = Path(__file__).resolve().parent
+SCRIPTS = HERE.parent / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/scripts"
+PREVIOUS = HERE / "tokensand-workflow-check-0.1.24.tgz"
+PREVIOUS_SHA = "5d0d368dc68dfe093bf2c2ecbaea4401102a82156e012594ab78abae77639db1"
+# Identical installed file from the published 0.1.19 and 0.1.24 installers.
+PREVIOUS_RUNNER = "35d32d550d4b7d226b34b1bc3710f63624bf5bcd49bb65cd6a3a4f6cc08e4ac6"
+VERSION = "0.1.25"
+ARCHIVE = f"tokensand-workflow-check-{VERSION}.tgz"
+BUNDLED = "standalone-check.mjs"
+HELPER = "trace_ai_sdk_7.mjs"
+
+
+def replace_once(text, original, new):
+    if text.count(original) != 1:
+        raise ValueError(f"Unexpected release source; expected one occurrence of {original!r}")
+    return text.replace(original, new)
+
+
+def standalone(core, helper, esbuild):
+    version = subprocess.check_output([esbuild, "--version"], text=True).strip()
+    if version != "0.28.1":
+        raise ValueError(f"Expected esbuild 0.28.1, got {version}")
+    # Native --import remains compatible. In the single-file runner only the scoped
+    # inspector is needed; esbuild can then drop the independent disk recorder.
+    guard = 'if (new URL(import.meta.url).search !== "?trial") await install();'
+    scoped = replace_once(helper, guard, "")
+    output = subprocess.run(
+        [esbuild, "--bundle", "--platform=node", "--format=iife", "--target=node20.19",
+         "--global-name=tokensandScopedInspector", "--legal-comments=none", "--log-level=error",
+         "--sourcefile=trace_ai_sdk_7.mjs"],
+        input=scoped, text=True, capture_output=True, check=True,
+    ).stdout
+    # Keep the original entry-point scope intact. The installed watch wrapper and
+    # CI guard intentionally reuse names from that entry point.
+    embedded = replace_once(core, 'await import("./trace_ai_sdk_7.mjs?trial")', "await loadTrialToolInspector()")
+    prelude = (
+        "\nasync function loadTrialToolInspector() {\n"
+        '  const { createRequire } = await import("node:module");\n'
+        "  const require = createRequire(import.meta.url);\n"
+    )
+    return embedded + prelude + output + "  return tokensandScopedInspector;\n}\n"
+
+
+def build(esbuild):
+    previous = PREVIOUS.read_bytes()
+    if hashlib.sha256(previous).hexdigest() != PREVIOUS_SHA:
+        raise ValueError("Immutable 0.1.24 input archive checksum mismatch")
+    with tarfile.open(fileobj=io.BytesIO(previous)) as tar:
+        files = {}
+        for entry in tar.getmembers():
+            if not entry.isfile() or not entry.name.startswith("package/"):
+                raise ValueError("Unexpected archive member")
+            name = entry.name.removeprefix("package/")
+            files[name] = (tar.extractfile(entry).read(), entry.mode)
+
+    def overwrite(name, text):
+        files[name] = (text.encode(), files[name][1])
+
+    cli = files["cli.mjs"][0].decode()
+    cli = replace_once(cli, "copyFileSync(starter, runner, constants.COPYFILE_EXCL)",
+                       f'copyFileSync(new URL("./{BUNDLED}", import.meta.url), runner, constants.COPYFILE_EXCL)')
+    overwrite("cli.mjs", cli)
+    installer = files["install-test.mjs"][0].decode()
+    installer = replace_once(installer, 'new URL("./agent-check.mjs", import.meta.url)',
+                             f'new URL("./{BUNDLED}", import.meta.url)')
+    installer = replace_once(installer, "if (![\n", f'if (![\n      "{PREVIOUS_RUNNER}",\n')
+    overwrite("install-test.mjs", installer)
+    core = (SCRIPTS / "check_workflow.mjs").read_text()
+    helper = (SCRIPTS / HELPER).read_text()
+    # Recipient replay verifies this exact executable before running the original
+    # scorer. Keep that guard in step with the checker shipped in this archive.
+    old_core_hash = hashlib.sha256(files["agent-check.mjs"][0]).hexdigest()
+    core_hash = hashlib.sha256(core.encode()).hexdigest()
+    verifier = files["recheck-release-v1.mjs"][0].decode()
+    overwrite("recheck-release-v1.mjs", replace_once(verifier,
+        f"const checkerHash = '{old_core_hash}';", f"const checkerHash = '{core_hash}';"))
+    overwrite("agent-check.mjs", core)
+    files[HELPER] = (helper.encode(), 0o644)
+    bundle = standalone(core, helper, esbuild).encode()
+    files[BUNDLED] = (bundle, 0o644)
+    manifest = json.loads(files["package.json"][0])
+    manifest["version"] = VERSION
+    manifest["files"].extend([HELPER, BUNDLED])
+    overwrite("package.json", json.dumps(manifest, indent=2) + "\n")
+
+    archive = io.BytesIO()
+    with gzip.GzipFile(filename="", fileobj=archive, mode="wb", mtime=0, compresslevel=9) as compressed:
+        with tarfile.open(fileobj=compressed,mode="w",format=tarfile.USTAR_FORMAT) as tar:
+            for name, (contents, mode) in files.items():
+                entry = tarfile.TarInfo("package/" + name)
+                entry.mode = mode
+                entry.size = len(contents)
+                tar.addfile(entry, io.BytesIO(contents))
+    return archive.getvalue(), bundle
+
+
+def write_immutable(path, contents):
+    if path.exists():
+        if path.read_bytes() != contents:
+            raise FileExistsError(f"Different artifact exists at {path}. Build into a fresh directory.")
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("xb") as f:
+            f.write(contents)
+    print(hashlib.sha256(contents).hexdigest(), path)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--esbuild", required=True, help="local esbuild 0.28.1 binary")
+    parser.add_argument("--output-dir", type=Path, default=HERE)
+    parser.add_argument("--assets", type=Path, help="also emit directly downloadable starters here")
+    args = parser.parse_args()
+    archive, bundle = build(args.esbuild)
+    write_immutable(args.output_dir / ARCHIVE, archive)
+    if args.assets:
+        for filename in ("tokensand-first.test.mjs", "observe.workflow.mjs"):
+            write_immutable(args.assets / filename, bundle)

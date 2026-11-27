@@ -112,6 +112,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     invalidSelection("Set workflow repetitions to a whole number from 1 to 10.");
   }
   const trials = focused ? Math.max(3, definedTrials) : definedTrials;
+  let sdkInspector;
+  if (inspectTools) {
+    try {
+      const { createTrialToolInspector } = await import("./trace_ai_sdk_7.mjs?trial");
+      sdkInspector = await createTrialToolInspector();
+    } catch (error) {
+      // Older single-file copies can still inspect explicitly wrapped callbacks.
+      if (error.code !== "ERR_MODULE_NOT_FOUND") console.error("AI SDK tool inspection is unavailable for this replay.");
+    }
+  }
   if (focused) {
     const scope = caseIds.length === 1 ? "only " + JSON.stringify(caseIds[0]) : caseIds.length + " selected cases";
     console.log(`Checking ${scope} for ${trials} trials${caseIds.length > 1 ? " each" : ""}. Run the full suite before sharing a result.`);
@@ -165,6 +175,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
       ? JSON.stringify([item.id, repetition + 1, trials]) : label;
     test(name, { timeout: selected.timeoutMs }, async (t) => {
       const timings = inspectTools ? focusedToolTimings(repetition + 1) : null;
+      const sdkTrial = sdkInspector?.startTrial(repetition + 1);
+      let inspectionClosed = false;
+      function finishInspection(end) {
+        if (inspectionClosed) return;
+        inspectionClosed = true;
+        const sdk = sdkTrial?.close();
+        timings?.show(end, sdk?.available === true);
+        if (sdk?.available) showSdkToolCalls(repetition + 1, sdk);
+      }
       const executeLocal = async (kind, label, callback) => {
         t.signal.throwIfAborted();
         const validLabel = checkLabel(kind, label);
@@ -184,12 +203,15 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
       const onAbort = () => {
         interrupted = true;
         showCaseReplay(item.id);
-        timings?.show("case interrupted");
+        finishInspection("case interrupted");
       };
       t.signal.addEventListener("abort", onAbort, { once: true });
       const started = performance.now();
       try {
-        const output = await selected.candidate(structuredClone(item.input), context);
+        const input = structuredClone(item.input);
+        const output = sdkTrial
+          ? await sdkTrial.run(() => selected.candidate(input, context))
+          : await selected.candidate(input, context);
         assert.ok(!attemptedFetch, "Provider transport is disabled for this offline check.");
         if (valuesFile) {
           t.signal.throwIfAborted();
@@ -237,7 +259,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
         showCaseReplay(item.id);
         throw error;
       } finally {
-        timings?.show("case ended");
+        finishInspection("case ended");
         t.signal.removeEventListener("abort", onAbort);
       }
     });
@@ -273,9 +295,13 @@ function focusedToolTimings(trial) {
         if (completed.length > 5) completed.pop();
       }
     },
-    show(end) {
+    show(end, hasSdk) {
       if (shown) return;
       shown = true;
+      if (!total) {
+        if (!hasSdk) console.log(`No ctx.tool callbacks recorded in trial ${trial}.`);
+        return;
+      }
       const now = performance.now();
       const rows = [];
       for (const call of active) {
@@ -285,10 +311,29 @@ function focusedToolTimings(trial) {
       rows.push(...completed);
       if (firstRejection && !completed.includes(firstRejection)) rows.push(firstRejection);
       rows.sort((a, b) => a.index - b.index);
-      console.log(`Local tool calls (trial ${trial}, ${end}): ${rows.length} of ${total}`);
+      console.log(`Local tool calls (trial ${trial}, ${end}): ${rows.length} of ${total} ctx.tool callbacks`);
       for (const row of rows) {
         console.log(`  #${row.index} ${row.label} — ${row.outcome}, ${Math.round(row.ms)} ms`);
       }
     },
   };
+}
+
+function showSdkToolCalls(trial, inspection) {
+  const { tools, observed, omitted, comparison } = inspection;
+  console.log(`AI SDK tool calls (trial ${trial}): ${observed} recorded`);
+  // Surface errors and changes first. A conversion may be intentional.
+  const ordered = [...tools].sort((a, b) => b.errors - a.errors || b.changed - a.changed || b.completed - a.completed);
+  for (const row of ordered.slice(0, 5)) {
+    const details = [`${row.completed - row.errors} returned`];
+    if (row.errors) details.push(`${row.errors} errors`);
+    if (comparison) {
+      const paired = row.changed + row.equal;
+      if (paired) details.push(`selected value changed in ${row.changed}/${paired} tool-to-model pairs`);
+      if (row.unavailable) details.push(`${row.unavailable} without a matched pair`);
+    }
+    console.log(`  ${row.tool} — ${details.join(", ")}`);
+  }
+  if (ordered.length > 5) console.log(`  ${ordered.length - 5} additional tool names in the private trace.`);
+  if (omitted) console.log("Some tool events were incomplete, ambiguous or over the capture limit.");
 }
