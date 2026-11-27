@@ -51,7 +51,7 @@ With the skill installed, give your coding agent the public `tokensand.com/p/…
 
 The agent follows the project’s **Repo** link and tests the edition linked from its page in a separate checkout. If the page has no pinned edition, it reports the revision it ran from the default branch. **Check your own project** starts setup for your own app.
 
-To check a repair in your own repo, ask your agent: “Check this change against the last release. Tell me if a case disappeared, which checks fail, and whether the fix passes.” The agent can replay the original case IDs with the local Node or Python checker. Supply the earlier revision when it would be ambiguous.
+To check a repair in your repo, ask your agent: “Check this change against the last release. Which cases failed, and does the fix pass the original checks?” The agent pins the earlier commit, checks for missing cases and changed pass criteria, and runs the current suite. When running a named case yourself, pass the whole selector as one argument, for example `--case="-expedite / priority (EU)"`.
 
 ### Review a release with a teammate
 
