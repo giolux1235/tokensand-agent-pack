@@ -9,7 +9,7 @@ import test from 'node:test';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const pkg = version => join(root, 'packages', `tokensand-workflow-check-${version}.tgz`);
-const latest = '0.1.29';
+const latest = '0.1.30';
 const sha = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 
 test('the standalone Node download uses the release tested by the installer', () => {
@@ -135,7 +135,7 @@ test('paired checks use the same criteria in npm, the direct download and the in
   }
   prepare(5);
   assert.equal(run(process.execPath, [join(dist,'cli.mjs'), '--install-test']).status, 0);
-  const flags = ['--offline-workflow','./observe.workflow.mjs','--compare-baseline','--case=order'];
+  const flags = ['--offline-workflow','./observe.workflow.mjs','--compare-baseline','--case=order','--require-check=quantity'];
   for (const prefix of [
     ['npm', 'exec', '--offline', '--yes', '--package', pkg(latest), '--', 'tokensand-check'],
     [process.execPath, join(dist, 'standalone-check.mjs')],
@@ -154,6 +154,11 @@ test('paired checks use the same criteria in npm, the direct download and the in
     const fixed = check();
     assert.equal(fixed.status, 0, fixed.text);
     assert.match(fixed.text, /Recovered: "order" \/ "quantity"/);
+    const lost = run(prefix[0], [...prefix.slice(1), '--offline-workflow', './observe.workflow.mjs',
+      '--compare-baseline', '--require-case=order', '--require-check=currency']);
+    assert.equal(lost.status, 2, lost.text);
+    assert.match(lost.text, /Missing required checks: "currency"/);
+    assert.doesNotMatch(lost.text, /Recovered:/);
   }
 });
 
@@ -164,6 +169,7 @@ for (const [version, installedSha] of [
   ['0.1.26', '2a8e9f35bc7a988417a88d2b10d0ae6bcc565d6db13df75c3d0227dfb63f47a4'],
   ['0.1.27', '75e58b67b15379a7696491561f8d0086a9b5b992e29a02bf2f4ecb69036f68af'],
   ['0.1.28', '041faedfa05aa9c1e9e5b02f5de50e80ec5cff496b7d2cf6b29796b43b93b576'],
+  ['0.1.29', 'c63f835155e1d28cc9f8536acff4df70de0479c388860d1c07308cd27136b377'],
 ]) {
   test('upgrades the unmodified '+version+' runner and protects local edits',t=>{
     const {dir,run,unpack}=fixture(t);
@@ -196,7 +202,7 @@ for (const [version, installedSha] of [
 
 test('packaged checker and preload exactly match the Agent Pack; unaffected release tools keep their bytes',t=>{
   const {unpack}=fixture(t);
-  const old=unpack('0.1.28'), next=unpack(latest);
+  const old=unpack('0.1.29'), next=unpack(latest);
   const scripts=join(root,'plugins/tokensand-agent-pack/skills/tokensand-agent-pack/scripts');
   assert.equal(sha(join(next,'agent-check.mjs')),sha(join(scripts,'check_workflow.mjs')));
   assert.equal(sha(join(next,'trace_ai_sdk_7.mjs')),sha(join(scripts,'trace_ai_sdk_7.mjs')));
