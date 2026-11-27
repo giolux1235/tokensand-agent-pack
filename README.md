@@ -92,6 +92,18 @@ To review just what a teammate shared, use `--all-cases` in place of the case fl
 
 A recorded failure that passes in isolation stays inconclusive. Compare the two pass counts. Replay omits application environment variables, so reproduce the original worker settings. For example, put `{"bufferSize":16}` in the failing case input and have the worker use it. If earlier cases change shared state, rerun the full workflow in its original order.
 
+### Review an existing Vitest test
+
+From the full Agent Pack install, use Python 3.9+ and each trusted checkout’s locally installed Vitest 4. Run the existing offline test files directly. With the global install above, run this from the later checkout:
+
+```sh
+python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_vitest.py" --before-root ../before tests/orders.test.ts
+```
+
+Claude Code can use `$HOME/.claude/skills` instead. For a project-local install use `.agents/skills` or `.claude/skills`. Install each checkout’s locked dependencies first. `--config vitest.special.config.ts` selects an explicit config. The adjacent module with the same basename as the selected test is recognized as its implementation. Otherwise add `--implementation src/orders.ts` for the intended change. Reserve this flag for code under test and keep expectations as controls. Declare external fixture files read through the filesystem with `--test-source FILE`. Use `--show-names` locally to see the failing file and case title, which may contain private fixture data.
+
+Each side runs fresh in CI mode with snapshot updates disabled and application environment variables omitted. Exit 0 verifies an ordinary failing case recovered with the same named cases, checked inputs and a fully passing candidate. Exit 100 holds the decision. Exit 1 means unusable setup or evidence. Results cover the selected files in one project. The reviewer checks reached local Vite modules, active config and setup, package manifests, standard snapshots and directly named file snapshots. A changed helper or a dynamic file snapshot holds the decision. Arbitrary filesystem reads, external packages and environment-dependent behavior need separate review. Use trusted offline suites; the runner does not sandbox their network or filesystem access. The reviewer sends no data.
+
 ### Review an existing Python test
 
 From the later checkout, ask Codex or Claude Code to run the same pytest target against the earlier checkout and show which cases recovered. With the global skill installed, you can also run one command.
