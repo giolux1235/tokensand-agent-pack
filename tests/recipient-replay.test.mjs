@@ -14,7 +14,7 @@ test('a recipient can verify several selected cases against the original scorer'
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const cli = existsSync(sourceCli) ? sourceCli : join(dir, 'package', 'cli.mjs');
   if (!existsSync(sourceCli)) {
-    const archive = fileURLToPath(new URL('../packages/tokensand-workflow-check-0.1.22.tgz', import.meta.url));
+    const archive = fileURLToPath(new URL('../packages/tokensand-workflow-check-0.1.23.tgz', import.meta.url));
     execFileSync('tar', ['-xzf', archive, '-C', dir]);
   }
   const repo = join(dir, 'service');
@@ -128,12 +128,15 @@ test('a recipient can verify several selected cases against the original scorer'
   });
 
   await t.test('holds a recorded regression when the same revision passes only in isolation', () => {
-    save({...note,cases:[{...cases[1],verdict:'regressed',candidate:{passed:2,total:3}}]});
+    save({...note,cases:[{...cases[1],verdict:'regressed',candidate:{passed:2,total:3,workerSetting:'private-incident-detail'}}]});
     const result=run([...selected('clear'),'--run'],2);
     assert.equal(result.verdict,'unknown');
     assert.equal(result.agreement,'different_verdict');
+    assert.deepEqual(result.recordedCandidate,{passed:2,total:3});
     assert.deepEqual(result.candidate,{passed:3,total:3});
-    assert.match(result.reason,/full workflow/i);
+    assert.match(result.reason,/original worker settings/i);
+    assert.match(result.reason,/case order|original order/i);
+    assert.doesNotMatch(JSON.stringify(result),/private-incident-detail/);
     save();
   });
 
