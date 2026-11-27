@@ -1,6 +1,7 @@
 """Offline starter. Replace plan_calls with your own local function returning call IDs."""
 import argparse
 import copy
+from collections.abc import AsyncIterable
 import inspect
 import json
 import reprlib
@@ -49,6 +50,17 @@ class ValuePreview(reprlib.Repr):
         return f"<{type(value).__name__}>"
 
 
+def resolved_result(value, callback):
+    if inspect.isawaitable(value) or isinstance(value, AsyncIterable):
+        if inspect.iscoroutine(value) and inspect.getcoroutinestate(value) == inspect.CORO_CREATED:
+            value.close()
+        raise TypeError(
+            f"{callback} returned an unfinished async result. "
+            "Await the call or collect the stream inside your adapter before returning its result."
+        )
+    return value
+
+
 def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=None):
     items = definition["cases"]
     if not items or not definition["checks"]:
@@ -84,14 +96,14 @@ def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=N
     for case in items:
         for trial in range(1, trials + 1):
             def check(current=case, repetition=trial):
-                output = definition["candidate"](copy.deepcopy(current["input"]))
+                output = resolved_result(definition["candidate"](copy.deepcopy(current["input"])), "candidate")
                 if values_path is not None:
                     row = {"trial": repetition, "actual": preview.repr(output)[:2048]}
                     if isinstance(current["input"], dict) and "expected" in current["input"]:
                         row["expected"] = preview.repr(current["input"]["expected"])[:2048]
                     with values_path.open("a", encoding="utf-8") as handle:
                         handle.write(json.dumps(row) + "\n")
-                scores = definition["evaluate"](copy.deepcopy(current["input"]), output, "candidate")
+                scores = resolved_result(definition["evaluate"](copy.deepcopy(current["input"]), output, "candidate"), "evaluate")
                 failed, unscored = [], []
                 timed_out = False
                 for rule in definition["checks"]:
