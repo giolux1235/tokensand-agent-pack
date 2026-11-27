@@ -24,7 +24,7 @@ test('installed watcher rescores file-based policy and scoring edits and ignores
     renameSync(file('saving.tmp'), file(name));
   };
   const env = {PATH: process.env.PATH, HOME: root, NO_COLOR: '1', NODE_DISABLE_COLORS: '1'};
-  const archive = fileURLToPath(new URL('../packages/tokensand-workflow-check-0.1.28.tgz', import.meta.url));
+  const archive = fileURLToPath(new URL('../packages/tokensand-workflow-check-0.1.29.tgz', import.meta.url));
   execFileSync('tar', ['-xzf', archive, '-C', root]);
   write('package.json', '{}');
   write('policy.txt', 'confirm');
@@ -53,8 +53,9 @@ test('installed watcher rescores file-based policy and scoring edits and ignores
     const end = output.indexOf(marker,offset);
     assert.ok(end >= offset, 'No fresh completed check: '+output.slice(offset));
     const run = output.slice(offset,end);
-    assert.match(run, new RegExp('(?:#|ℹ) pass '+passed+'\\b'));
-    assert.match(run, new RegExp('(?:#|ℹ) fail '+failed+'\\b'));
+    assert.ok(run.includes(`${passed} passed, ${failed} failed`), run);
+    assert.doesNotMatch(run, /AssertionError|at TestContext/);
+    if (failed) assert.match(run, /FAIL refund .*correct/);
     offset = end + marker.length;
   }
   await verdict(6, 0);
@@ -93,4 +94,22 @@ test('installed watcher rescores file-based policy and scoring edits and ignores
   offset = output.length;
   write('startup.txt','ready');
   await verdict(6, 0);
+  child.kill('SIGTERM');
+  await closed;
+
+  write('policy.txt','issue immediately');
+  const verbose = spawn(process.execPath, [file('tokensand-check.mjs'), '--watch-workflow', '--verbose'], {cwd:project, env});
+  const finished = once(verbose, 'close');
+  let diagnostics = '';
+  verbose.stdout.on('data', data => { diagnostics += data; });
+  verbose.stderr.on('data', data => { diagnostics += data; });
+  try {
+    const limit = Date.now() + 5000;
+    while (!diagnostics.includes('Watching for changes.') && Date.now() < limit) await delay(20);
+    assert.match(diagnostics, /AssertionError|ERR_ASSERTION/);
+    assert.match(diagnostics, /Failed running tokensand-check/);
+  } finally {
+    verbose.kill('SIGTERM');
+    await finished;
+  }
 });
