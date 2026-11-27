@@ -493,7 +493,7 @@ function pairedId(id, index) {
     !/(?:^|[^a-z0-9])(?:sk[-_]|tobs_|dai_|tvly-)/i.test(id) ? JSON.stringify(id) : "#" + (index + 1);
 }
 
-async function runLocalArm(adapter, ids, requiredCases, requiredChecks, arm) {
+async function runLocalArm(adapter, ids, requiredCases, requiredChecks, arm, baselineMatrix) {
   const { fork } = await import("node:child_process");
   const options = [...ids.map(id => "--case=" + id), ...requiredCases.map(id => "--require-case=" + id),
     ...requiredChecks.map(id => "--require-check=" + id)];
@@ -503,7 +503,7 @@ async function runLocalArm(adapter, ids, requiredCases, requiredChecks, arm) {
   return new Promise(resolve => {
     let matrix, timer, timedOut = false, finished = false, active, invalid = false, criteriaUnavailable = false;
     const scores = new Map();
-    let missingCoverage;
+    let missingCoverage, canReportFirstIssue = false;
     function deadline(ms) {
       clearTimeout(timer);
       timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, ms);
@@ -513,6 +513,7 @@ async function runLocalArm(adapter, ids, requiredCases, requiredChecks, arm) {
       if (timedOut || !msg || typeof msg !== "object") return;
       if (msg.type === "matrix" && !matrix) {
         matrix = msg;
+        canReportFirstIssue = baselineMatrix !== undefined && isDeepStrictEqual(baselineMatrix, matrix);
         deadline(30000);
       } else if (matrix && msg.type === "start") {
         active = JSON.stringify([msg.id, msg.repetition]);
@@ -521,7 +522,20 @@ async function runLocalArm(adapter, ids, requiredCases, requiredChecks, arm) {
           msg.scores.length === matrix.checks.length && msg.scores.every(s => s === null || typeof s === "boolean")) {
         const key = JSON.stringify([msg.id, msg.repetition]);
         if (active !== key || scores.has(key)) invalid = true;
-        else scores.set(key, msg.scores);
+        else {
+          scores.set(key, msg.scores);
+          if (canReportFirstIssue && !invalid && !finished && !criteriaUnavailable) {
+            const checkIndex = msg.scores.findIndex(score => score !== true);
+            if (checkIndex < 0 || !Number.isInteger(msg.repetition) || msg.repetition < 0 || msg.repetition >= baselineMatrix.trials) return;
+            const caseIndex = baselineMatrix.cases.findIndex(([id]) => id === msg.id);
+            if (caseIndex < 0) return;
+            const status = msg.scores[checkIndex] === false ? "failed" : "unscored";
+            const caseId = pairedId(baselineMatrix.cases[caseIndex][0], caseIndex);
+            const checkId = pairedId(baselineMatrix.checks[checkIndex], checkIndex);
+            console.error(`Candidate check ${status}: ${caseId} / ${checkId} · trial ${msg.repetition + 1}. Full check continues.`);
+            canReportFirstIssue = false;
+          }
+        }
       } else if (msg.type === "missing-coverage" && !matrix && Array.isArray(msg.cases) && Array.isArray(msg.checks)) {
         // Only echo the caller's requirements, never a worker-supplied label.
         missingCoverage = {
@@ -565,7 +579,7 @@ async function compareLocalArms(adapter, ids, requiredCases, requiredChecks) {
   try {
     const original = await hash();
     for (const arm of ["baseline", "candidate"]) {
-      const result = await runLocalArm(adapter, ids, requiredCases, requiredChecks, arm);
+      const result = await runLocalArm(adapter, ids, requiredCases, requiredChecks, arm, before?.matrix);
       if (result?.missingCoverage) {
         for (const [kind, missing] of Object.entries(result.missingCoverage)) {
           if (missing.length) console.error("Missing required " + kind + ": " + missing.map(pairedId).join(", "));
