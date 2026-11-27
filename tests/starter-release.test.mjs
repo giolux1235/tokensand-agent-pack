@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,9 @@ test("the agent, maintainer guide and pull request use the same public checker",
   const archive = readFileSync(new URL("packages/" + archiveUrl.split("/").pop(), root));
   const sha = createHash("sha256").update(archive).digest("hex");
   assert.ok(workflow.includes(sha + "  $temp/check.tgz"));
+  const mirror = new URL("plugins/tokensand-agent-pack/skills/tokensand-agent-pack/scripts/check_workflow.mjs", root);
+  const member = execFileSync("tar", ["-xzOf", "-", "package/agent-check.mjs"], {input:archive});
+  assert.deepEqual(readFileSync(mirror), member);
 });
 
 test("a failed receipt gives the reviewer the local command without running the adapter in CI", t => {
@@ -96,4 +99,29 @@ test("the documented author command catches a failure on the second trial", t =>
   };
   run(false, 100, 1);
   run(true, 0, 2);
+});
+
+test("an unscored check leaves the failed case visible without issuing a fresh receipt", t => {
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), "tokensand-guide-mixed-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const checkout = join(dir, "checkout");
+  mkdirSync(checkout);
+  const [, url] = read("examples/github/starter-check.yml").match(/^\s*STARTER_URL: (\S+)$/m);
+  const archive = fileURLToPath(new URL("packages/" + url.split("/").pop(), root));
+  execFileSync("tar", ["-xzf", archive, "-C", dir]);
+  const git = (...args) => execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", ...args], { cwd: checkout });
+  git("init", "-q");
+  writeFileSync(join(checkout, "observe.workflow.mjs"), `export default {
+    repetitions: 3, maxCallsPerRun: {candidate: 0},
+    cases: [{id:"private-case", input:1}], checks:[{id:"amount"},{id:"category"}],
+    candidate: value => value, evaluate: () => ({amount:false,category:null}),
+  };`);
+  git("add", "observe.workflow.mjs");
+  git("commit", "-qm", "Check invoice");
+  const result = spawnSync(process.execPath, [join(dir, "package/cli.mjs"), "--pr-receipt"], { cwd:checkout, encoding:"utf8" });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /Status: \*\*mixed\*\*/);
+  assert.match(result.stdout, /1 total, 0 passed, 1 failed, 1 unscored, 1 both/);
+  assert.doesNotMatch(result.stdout, /private-case/);
+  assert.ok(!existsSync(join(checkout, ".tokensand/starter-check.json")));
 });
