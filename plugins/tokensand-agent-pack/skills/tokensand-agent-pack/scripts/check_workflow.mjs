@@ -35,6 +35,8 @@ const workflow = {
 export default workflow;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  // Score receipts travel over a private IPC pipe. App and test reporter output stays in the child.
+  const pairArm = process.send && process.argv[2] === "--_paired-arm" ? process.argv.splice(2, 2)[1] : undefined;
   function invalidSelection(message) {
     console.error(message);
     process.exit(2);
@@ -44,6 +46,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     ({ values } = parseArgs({
       options: {
         "offline-workflow": { type: "string", multiple: true }, case: { type: "string", multiple: true },
+        "compare-baseline": { type: "boolean" },
         "inspect-values": { type: "boolean" }, "inspect-tools": { type: "boolean" }, "require-hosted-labels": { type: "boolean" },
       },
     }));
@@ -53,6 +56,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   const { "offline-workflow": paths = [], case: caseIds = [], "inspect-values": inspectValues, "inspect-tools": inspectTools, "require-hosted-labels": requireHostedLabels } = values;
   if (paths.length > 1) invalidSelection("Use --offline-workflow once. Run each workflow in a separate command.");
   const [adapter] = paths;
+  if (values["compare-baseline"]) {
+    if (!adapter || inspectTools || inspectValues || requireHostedLabels || pairArm) {
+      invalidSelection("Use --compare-baseline with --offline-workflow PATH and optional --case IDs. Run inspection or hosted label checks separately.");
+    }
+    process.exit(await compareLocalArms(adapter, caseIds));
+  }
   if (adapter === "" || caseIds.includes("")) invalidSelection("Supply a workflow path or case ID after its option.");
   if (new Set(caseIds).size !== caseIds.length) invalidSelection("A --case ID was requested more than once. List each ID once.");
   if ((inspectTools || inspectValues) && caseIds.length !== 1) {
@@ -93,6 +102,23 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     }
   }
   if (!selected || typeof selected !== "object") setupError("Provide a workflow object as the module's default export.");
+  if (pairArm) {
+    process.on("uncaughtExceptionMonitor", () => process.send({ type: "fatal" }));
+    process.on("unhandledRejection", () => process.send({ type: "fatal" }));
+    if (!["baseline", "candidate"].includes(pairArm) || ["baseline", "candidate"].some(arm =>
+      selected.maxCallsPerRun?.[arm] !== 0 || typeof selected[arm] !== "function") || typeof selected.evaluate !== "function") {
+      invalidSelection("Both callbacks, one evaluator and two zero provider budgets are required.");
+    }
+    if (![selected.cases, selected.checks].every(entries => Array.isArray(entries) && entries.length &&
+      entries.every(entry => typeof entry?.id === "string" && entry.id.length) &&
+      new Set(entries.map(entry => entry.id)).size === entries.length)) invalidSelection("Declare unique case and check IDs.");
+    if (selected.timeoutMs !== undefined && (!Number.isSafeInteger(selected.timeoutMs) || selected.timeoutMs < 1 || selected.timeoutMs > 2147480000)) {
+      invalidSelection("Use a positive integer trial deadline.");
+    }
+    selected = { ...selected, timeoutMs: selected.timeoutMs ?? 30000,
+      cases: selected.cases.map(({ id, input }) => ({ id, input: structuredClone(input) })),
+      checks: selected.checks.map(({ id }) => ({ id })) };
+  }
   if (adapter && typeof reportWatchPaths === "function") {
     const { dirname } = await import("node:path");
     reportWatchPaths(dirname(adapter), selected.sourceFiles);
@@ -158,6 +184,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     invalidSelection("Set workflow repetitions to a whole number from 1 to 10.");
   }
   const trials = focused ? Math.max(3, definedTrials) : definedTrials;
+  if (pairArm) {
+    const { serialize } = await import("node:v8");
+    const { createHash } = await import("node:crypto");
+    process.send({ type: "matrix", cases: items.map(({ id, input }) => [id, createHash("sha256").update(serialize(input)).digest("hex")]),
+      checks: selected.checks.map(c => c.id), trials, timeoutMs: selected.timeoutMs,
+      evaluator: createHash("sha256").update(Function.prototype.toString.call(selected.evaluate)).digest("hex"),
+      checksVersion: selected.checksVersion });
+  }
   let sdkInspector;
   if (inspectTools) {
     try {
@@ -197,6 +231,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   }
   let interrupted = false;
   test.after(() => {
+    if (pairArm) process.send({ type: "done" });
     if (requireHostedLabels) {
       if (invalidHostedLabel || !observedLabels) {
         console.error(invalidHostedLabel ? "Hosted label check failed." : "No step or tool labels ran. Exercise an instrumented candidate path.");
@@ -220,6 +255,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     const name = process.env.TOKENSAND_STARTER_COUNTS
       ? JSON.stringify([item.id, repetition + 1, trials]) : label;
     test(name, { timeout: selected.timeoutMs }, async (t) => {
+      if (pairArm) process.send({ type: "start", id: item.id, repetition });
       const timings = inspectTools ? focusedToolTimings(repetition + 1) : null;
       const sdkTrial = sdkInspector?.startTrial(repetition + 1);
       let inspectionClosed = false;
@@ -257,7 +293,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
         const input = structuredClone(item.input);
         const output = sdkTrial
           ? await sdkTrial.run(() => selected.candidate(input, context))
-          : await selected.candidate(input, context);
+          : await selected[pairArm || "candidate"](input, context);
         assert.ok(!attemptedFetch, "Provider transport is disabled for this offline check.");
         if (valuesFile) {
           t.signal.throwIfAborted();
@@ -267,17 +303,19 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
         }
         let scores, evaluatorThrew = false;
         try {
-          scores = await selected.evaluate({ input: structuredClone(item.input), output, variant: "candidate" });
+          scores = await selected.evaluate({ input: structuredClone(item.input), output, variant: pairArm || "candidate" });
         } catch {
           evaluatorThrew = true;
         }
         const failed = [], unscored = [], scorersThatThrew = [];
-        for (const check of selected.checks) {
+        const pairScores = pairArm ? Array(selected.checks.length).fill(null) : null;
+        for (const [index, check] of selected.checks.entries()) {
           t.signal.throwIfAborted();
           const label = check.label || check.id;
           try {
             const score = scores && Object.hasOwn(scores, check.id) ? scores[check.id] : undefined;
             const value = typeof score === "function" ? await score() : score;
+            if (pairScores && typeof value === "boolean") pairScores[index] = value;
             if (value === false) failed.push(label);
             else if (value !== true) unscored.push(label);
           } catch {
@@ -290,6 +328,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
         if (Number.isFinite(selected.timeoutMs) && elapsed > selected.timeoutMs) {
           showCaseReplay(item.id, true);
           failed.push(`Case took ${Math.ceil(elapsed)} ms (deadline ${selected.timeoutMs} ms)`);
+        } else if (pairArm && !t.signal.aborted) {
+          process.send({ type: "scores", id: item.id, repetition, scores: pairScores });
         }
         if (unscored.length) {
           const reasons = failed.length ? [`Failed checks: ${failed.join(", ")}`] : [];
@@ -383,4 +423,117 @@ function showSdkToolCalls(trial, inspection) {
   }
   if (ordered.length > 5) console.log(`  ${ordered.length - 5} additional tool names in the private trace.`);
   if (omitted) console.log("Some tool events were incomplete, ambiguous or over the capture limit.");
+}
+
+async function runLocalArm(adapter, ids, arm) {
+  const { fork } = await import("node:child_process");
+  const child = fork(process.argv[1], ["--_paired-arm", arm, "--offline-workflow", adapter, ...ids.map(id => "--case=" + id)], {
+    execArgv: [], stdio: ["ignore", "ignore", "ignore", "ipc"],
+  });
+  return new Promise(resolve => {
+    let matrix, timer, timedOut = false, finished = false, active, invalid = false;
+    const scores = new Map();
+    function deadline(ms) {
+      clearTimeout(timer);
+      timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, ms);
+    }
+    deadline(30000);
+    child.on("message", msg => {
+      if (timedOut || !msg || typeof msg !== "object") return;
+      if (msg.type === "matrix" && !matrix) {
+        matrix = msg;
+        deadline(30000);
+      } else if (matrix && msg.type === "start") {
+        active = JSON.stringify([msg.id, msg.repetition]);
+        deadline(matrix.timeoutMs + 1000); // Covers a CPU-bound callback that never yields to Node's timer.
+      } else if (matrix && msg.type === "scores" && Array.isArray(msg.scores) &&
+          msg.scores.length === matrix.checks.length && msg.scores.every(s => s === null || typeof s === "boolean")) {
+        const key = JSON.stringify([msg.id, msg.repetition]);
+        if (active !== key || scores.has(key)) invalid = true;
+        else scores.set(key, msg.scores);
+      } else if (msg.type === "done") {
+        finished = true;
+        deadline(2000);
+      } else {
+        invalid = true;
+      }
+    });
+    child.on("error", () => { clearTimeout(timer); resolve(null); });
+    child.on("close", code => {
+      clearTimeout(timer);
+      // A nonzero exit with a complete all-green matrix is a runtime failure.
+      const reportedFailure = matrix && (scores.size < matrix.cases.length * matrix.trials ||
+        [...scores.values()].some(values => values.some(value => value !== true)));
+      const normal = finished && (code === 0 || code === 1 && reportedFailure);
+      if (!matrix || invalid || !(normal || timedOut && active && !finished)) {
+        resolve(null);
+      } else {
+        resolve({ matrix, scores });
+      }
+    });
+  });
+}
+
+async function compareLocalArms(adapter, ids) {
+  const { createHash } = await import("node:crypto");
+  const { readFile } = await import("node:fs/promises");
+  const hash = async () => createHash("sha256").update(await readFile(adapter)).digest("hex");
+  let before, after;
+  try {
+    const original = await hash();
+    for (const arm of ["baseline", "candidate"]) {
+      const result = await runLocalArm(adapter, ids, arm);
+      if (!result) {
+        console.error(`Could not score the ${arm}. Check the workflow path, selected IDs, both callbacks, evaluator and zero provider budgets. Run the ordinary local check for setup details.`);
+        return 2;
+      }
+      if (await hash() !== original) {
+        console.error("The workflow adapter changed during the check. Save it and rerun.");
+        return 2;
+      }
+      if (arm === "baseline") before = result;
+      else after = result;
+    }
+  } catch {
+    console.error("Could not read the workflow or start a local worker. Check the --offline-workflow file path and Node subprocess access.");
+    return 2;
+  }
+  if (!isDeepStrictEqual(before.matrix, after.matrix)) {
+    console.error("The cases, inputs, repetitions, deadlines or evaluator changed between variants. Freeze the fixtures and rerun.");
+    return 2;
+  }
+  const {cases, checks, trials} = before.matrix;
+  const safeId = (id, index) => id.length <= 120 && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(id) &&
+    !/(?:^|[^a-z0-9])(?:sk[-_]|tobs_|dai_|tvly-)/i.test(id) ? JSON.stringify(id) : "#" + (index + 1);
+  let failed = false, incomplete = false, newFailure = false;
+  console.log("Baseline and candidate on the same cases and checks");
+  for (const [ci, [id]] of cases.entries()) {
+    for (const [index, check] of checks.entries()) {
+      const groups = new Map();
+      for (let trial = 0; trial < trials; trial++) {
+        const key = JSON.stringify([id, trial]);
+        const old = before.scores.get(key)?.[index];
+        const current = after.scores.get(key)?.[index];
+        let transition;
+        if (old == null || current == null) {
+          const state = score => score == null ? "unscored" : score ? "passed" : "failed";
+          transition = `Unscored (baseline ${state(old)}, candidate ${state(current)})`;
+          incomplete = true;
+        } else if (!current) {
+          transition = old ? "New failure" : "Existing failure";
+          newFailure ||= old;
+          failed = true;
+        } else {
+          transition = old ? "Passed both" : "Recovered";
+        }
+        if (!groups.has(transition)) groups.set(transition, []);
+        groups.get(transition).push(trial + 1);
+      }
+      for (const [transition, numbers] of groups) {
+        console.log(`${transition}: ${safeId(id, ci)} / ${safeId(check, index)} · trials ${numbers.join(", ")}`);
+      }
+    }
+  }
+  if (!newFailure) console.log(incomplete ? "New failures: undetermined (unscored checks)" : "New failures: 0");
+  return failed || incomplete ? 1 : 0;
 }
