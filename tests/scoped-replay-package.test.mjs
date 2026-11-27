@@ -12,6 +12,13 @@ const pkg = version => join(root, 'packages', `tokensand-workflow-check-${versio
 const latest = '0.1.28';
 const sha = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 
+test('the standalone Node download uses the release tested by the installer', () => {
+  const readme = readFileSync(join(root, 'README.md'), 'utf8');
+  const link = readme.match(/\[Node\.js checker\]\(([^)]+)\)/);
+  assert.ok(link, 'Missing standalone Node checker download');
+  assert.equal(link[1], `https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-${latest}/tokensand-first.test.mjs`);
+});
+
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'tokensand-package-test-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
