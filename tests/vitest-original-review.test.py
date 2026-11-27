@@ -76,6 +76,115 @@ class OriginalReview(unittest.TestCase):
         self.assertIn("Original tests (replayed): 2/2 passed, 0 failed.", result)
         self.assertNotIn("VERIFIED REPAIR", result)
 
+    def test_markdown_reports_clean_revisions_and_original_counts_without_private_labels(self):
+        revisions = []
+        for root in (self.after, self.peer):
+            self.git(root, "add", "-u")
+            self.git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                     "commit", "-qm", "private message")
+            revisions.append(subprocess.check_output(["git", "-C", root, "rev-parse", "HEAD"], text=True).strip())
+        result = self.review(100, "--markdown", pair=True, replay=False)
+        self.assertIn(f"| 1 | {revisions[0]} | 2/2 | 1/2 (replayed) | Hold |", result)
+        self.assertIn(f"| 2 | {revisions[1]} | 2/2 | 2/2 (same suite) | Verified repair |", result)
+        self.assertIn("checked implementation stayed the same", result)
+        self.assertIn("Baseline passed: 1/2", result)
+        for private in ("private message", "private-customer-example", "route.mjs", "route.test.mjs",
+                        str(self.root), "proposed", "other", "case#", "--before-root"):
+            self.assertNotIn(private, result)
+
+    def test_markdown_dirty_worktree_and_missing_proposal_keep_their_own_results(self):
+        self.git(self.after, "update-index", "--assume-unchanged", "route.test.mjs")
+        result = self.review(1, "--markdown", "--after-root", str(self.root / "private-missing"),
+                             pair=True, replay=False)
+        self.assertIn("| 1 | Uncommitted | 2/2 | 1/2 (replayed) | Unavailable |", result)
+        self.assertIn("| 2 | Uncommitted | 2/2 | 2/2 (same suite) | Unavailable |", result)
+        self.assertIn("| 3 | Unavailable | Unavailable | Unavailable | Unavailable |", result)
+        self.assertNotIn("private-missing", result)
+        self.assertNotIn("private-customer-example", self.review(1, "--show-names", "--markdown", replay=False))
+
+    def test_markdown_refuses_staged_repair_and_a_changed_clean_head_after_real_capture(self):
+        from argparse import Namespace
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+        sys.path.insert(0, str(CLI.parent))
+        self.addCleanup(sys.path.remove, str(CLI.parent))
+        import review_vitest as runner
+        self.git(self.peer, "add", "route.mjs")
+        args = Namespace(before_root=self.base, after_root=[self.peer], files=[Path("route.test.mjs")],
+                         implementation=[], test_source=[], config=None, show_names=False)
+        stream = StringIO()
+        with redirect_stdout(stream):
+            self.assertEqual(runner.markdown(args), 1)
+        self.assertIn("Uncommitted | 2/2 | 2/2 (same suite) | Unavailable", stream.getvalue())
+        for message in ("fixed", "same tree"):
+            self.git(self.peer, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                     "commit", "--allow-empty", "-qm", message)
+        new = subprocess.check_output(["git", "-C", self.peer, "rev-parse", "HEAD"], text=True).strip()
+        self.git(self.peer, "reset", "--hard", "HEAD^")
+        capture = runner.capture
+
+        def move_after_capture(root, selected, directory):
+            measured = capture(root, selected, directory)
+            if root == self.peer:
+                self.git(root, "update-ref", "HEAD", new)
+            return measured
+
+        stream = StringIO()
+        with patch.object(runner, "capture", move_after_capture), redirect_stdout(stream):
+            self.assertEqual(runner.markdown(args), 1)
+        self.assertIn("Unavailable | 2/2 | 2/2 (same suite) | Unavailable", stream.getvalue())
+        self.assertNotIn(new, stream.getvalue())
+
+    def test_markdown_keeps_unavailable_original_separate_from_submitted_score(self):
+        (self.after / "private-untracked").write_text("secret-marker")
+        result = self.review(1, "--markdown", replay=False)
+        self.assertIn("| 1 | Unavailable | 2/2 | Unavailable | Unavailable |", result)
+        self.assertNotIn("private-untracked", result)
+        self.assertNotIn("secret-marker", result)
+
+    def test_recipient_rechecks_mixed_verdict_and_rejects_forged_note(self):
+        for root in (self.after, self.peer):
+            self.git(root, "add", "-u")
+            self.git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                     "commit", "-qm", "proposal")
+        note = self.root / "private-note.md"
+        authored = self.review(100, "--markdown", pair=True, replay=False)
+        self.assertRegex(authored, r"Scope and outcomes \(SHA-256\): [0-9a-f]{64}\n")
+        note.write_text(authored)
+        self.assertIn("Review reproduced", self.review(100, "--verify-markdown", str(note), pair=True, replay=False))
+        note.write_text(authored.replace("1/2 (replayed)", "2/2 (replayed)"))
+        self.assertIn("Review mismatch", self.review(1, "--verify-markdown", str(note), pair=True, replay=False))
+        note.write_text("private content\n" * 20000)
+        error = self.review(1, "--verify-markdown", str(note), pair=True, replay=False)
+        self.assertNotIn("private", error)
+
+    def test_recipient_rejects_the_same_counts_from_a_different_selection(self):
+        for root in (self.base, self.peer):
+            (root / "second.test.mjs").write_text(TEST)
+            self.git(root, "add", "route.mjs", "second.test.mjs")
+            self.git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                     "commit", "-qm", "second suite")
+        common = [sys.executable, "-B", str(CLI), "--before-root", str(self.base), "--after-root", str(self.peer),
+                  "--implementation", "route.mjs"]
+        file = self.root / "note.md"
+        first = subprocess.run(common + ["--markdown", "route.test.mjs"], text=True, capture_output=True, check=True)
+        second = subprocess.run(common + ["--markdown", "second.test.mjs"], text=True, capture_output=True, check=True)
+        self.assertEqual(first.stdout.split("Scope and outcomes")[0], second.stdout.split("Scope and outcomes")[0])
+        self.assertNotEqual(first.stdout, second.stdout)
+        file.write_text(first.stdout)
+        for selection, expected in (("route.test.mjs", 0), ("second.test.mjs", 1)):
+            rerun = subprocess.run(common + ["--verify-markdown", str(file), selection], text=True, capture_output=True)
+            self.assertEqual(rerun.returncode, expected, rerun.stderr + rerun.stdout)
+        # Case-to-outcome association and runner version are independently bound.
+        sys.path.insert(0, str(CLI.parent))
+        self.addCleanup(sys.path.remove, str(CLI.parent))
+        from review_vitest import measured_cases
+        a, b = ("suite", "a", "id1", 2, 1), ("suite", "b", "id2", 3, 1)
+        original = measured_cases({a: "failed", b: "passed"}, "4.1.11")
+        self.assertNotEqual(original, measured_cases({a: "passed", b: "failed"}, "4.1.11"))
+        self.assertNotEqual(original, measured_cases({a: "failed", b: "passed"}, "4.1.12"))
+
     def test_hidden_tracked_oracle_bare_guard_and_explicit_original_fixture(self):
         text = """import {test,expect} from 'vitest';
 import {readFileSync} from 'node:fs';

@@ -132,6 +132,50 @@ def stable(root, initial):
         raise Invalid("tracked worktree inputs changed during review")
 
 
+def clean_revision(root, tree):
+    """Only name HEAD when the index and the exact tested file bytes match it."""
+    if tree.problem:
+        return "Unavailable"
+    try:
+        revision = git(root, "rev-parse", "--verify", "HEAD^{commit}").decode("ascii").strip()
+        if not re.fullmatch(r"(?:[a-f0-9]{40}|[a-f0-9]{64})", revision):
+            return "Unavailable"
+        if git(root, "diff", "--cached", "--no-ext-diff", "--no-renames", "--name-only", revision):
+            return "Uncommitted"
+        # Index shortcuts such as assume-unchanged can hide edited bytes from git status.
+        entries = git(root, "ls-tree", "-r", "-z", revision).split(b"\0")[:-1]
+        if len(entries) != len(tree.files):
+            return "Uncommitted"
+        algorithm = "sha1" if len(revision) == 40 else "sha256"
+        for entry in entries:
+            header, name = entry.split(b"\t", 1)
+            mode, kind, oid = header.split()
+            path = Path(os.fsdecode(name))
+            if path not in tree.files or kind != b"blob":
+                return "Uncommitted"
+            digest, executable, link = tree.files[path]
+            expected_mode = b"120000" if link is not None else (b"100755" if executable else b"100644")
+            if mode != expected_mode:
+                return "Uncommitted"
+            if link is not None:
+                contents = os.fsencode(link)
+            else:
+                with (root / path).open("rb") as handle:
+                    size = os.fstat(handle.fileno()).st_size
+                    if size > MAX_BYTES:
+                        return "Unavailable"
+                    contents = handle.read(size + 1)
+            if len(contents) > MAX_BYTES or hashlib.sha256(contents).digest() != digest:
+                return "Unavailable"
+            blob = hashlib.new(algorithm, b"blob " + str(len(contents)).encode("ascii") + b"\0")
+            blob.update(contents)
+            if blob.hexdigest().encode("ascii") != oid:
+                return "Uncommitted"
+        return revision
+    except (Invalid, OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return "Unavailable"
+
+
 def copy_input(root, path, expected, dest):
     source = root / path
     if expected[2] is not None:
