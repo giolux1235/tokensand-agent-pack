@@ -150,7 +150,7 @@ npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/w
 
 With the Agent Pack installed in Codex or Claude Code, you can ask “Prepare the Tokens& result for a teammate to review. Show me what failed and leave it uncommitted.”
 
-Exit 0 means every case passed. Exit 100 means at least one case failed and every required check produced a score. Both write `.tokensand/starter-check.json`. If any check is unscored, the command exits 1 and writes no fresh receipt. It still reports known failures. Fix them and restore the unscored checks before sharing. Review the receipt’s four public fields (schema, tested revision, passed cases and failed cases), then commit only the receipt to share those counts.
+Exit 0 means every case passed. Exit 100 means at least one case failed, including a case where the workflow itself threw an error. Both write `.tokensand/starter-check.json`. If a scorer throws or omits a required score, the command exits 1 and writes no fresh receipt. It still reports known failures. Fix them and restore the unscored checks before sharing. Review the receipt’s four public fields (schema, tested revision, passed cases and failed cases), then commit only the receipt to share those counts.
 
 ```sh
 git add -- .tokensand/starter-check.json
