@@ -118,10 +118,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
     }
     return "'" + value.replaceAll("'", "'\\''") + "'";
   }
-  let replayShown = false;
-  function showCaseReplay(id) {
-    if (caseIds.length === 1 || replayShown || typeof id !== "string" || !id) return;
-    replayShown = true;
+  let firstReplayId;
+  let showedAdditionalReplay = false;
+  function showCaseReplay(id, interrupted = false) {
+    if (caseIds.length === 1 || typeof id !== "string" || !id || firstReplayId === id) return;
+    // A later timeout needs its own replay even if an earlier check already failed.
+    if (firstReplayId === undefined) {
+      firstReplayId = id;
+    } else if (interrupted && !showedAdditionalReplay) {
+      showedAdditionalReplay = true;
+    } else {
+      return;
+    }
     const script = process.argv[1];
     const args = ["node", commandPath(script)];
     if (adapter) args.push("--offline-workflow", commandPath(adapter));
@@ -240,7 +248,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
       };
       const onAbort = () => {
         interrupted = true;
-        showCaseReplay(item.id);
+        showCaseReplay(item.id, true);
         finishInspection("case interrupted");
       };
       t.signal.addEventListener("abort", onAbort, { once: true });
@@ -280,6 +288,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
         // A synchronous callback can finish before Node gets a turn to fire its timer.
         const elapsed = performance.now() - started;
         if (Number.isFinite(selected.timeoutMs) && elapsed > selected.timeoutMs) {
+          showCaseReplay(item.id, true);
           failed.push(`Case took ${Math.ceil(elapsed)} ms (deadline ${selected.timeoutMs} ms)`);
         }
         if (unscored.length) {
