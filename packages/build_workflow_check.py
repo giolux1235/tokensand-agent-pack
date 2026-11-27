@@ -72,6 +72,11 @@ def build(esbuild):
     overwrite("watch-workflow.mjs", (HERE / "watch-workflow.mjs").read_text())
     installer = files["install-test.mjs"][0].decode()
     installer = replace_once(installer, "if (![\n", f'if (![\n      "{PREVIOUS_RUNNER}",\n')
+    # The installed runner works after the original package or cache is removed.
+    # Embed the same small reporter the ordinary CLI uses for failed checks.
+    installer = replace_once(installer, '  const content = readFileSync(new URL("./watch-workflow.mjs",',
+        '  const reporter = readFileSync(new URL("./case-reporter.mjs", import.meta.url), "base64");\n'
+        '  const content = `const watchReporterUrl = "data:text/javascript;base64,${reporter}";\\n` + readFileSync(new URL("./watch-workflow.mjs",')
     overwrite("install-test.mjs", installer)
     core = (SCRIPTS / "check_workflow.mjs").read_text()
     helper = (SCRIPTS / HELPER).read_text()

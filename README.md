@@ -32,7 +32,7 @@ To install from a terminal, run this from the GitHub repository root with a self
 npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.28/tokensand-workflow-check-0.1.28.tgz --install-test --github
 ```
 
-Run the same install command to update an existing generated setup. Commit the setup files so teammates get the same checker. `npm test` runs it alongside the project’s tests. `npm run test:tokensand:watch` rechecks the workflow when you save an imported project file. For files read from disk, list prompts or policies in `sourceFiles` and scoring fixtures in `evaluatorSourceFiles`, using paths relative to `observe.workflow.mjs`. Stop watching with Ctrl+C.
+Run the same install command to update an existing generated setup. Commit the setup files so teammates get the same checker. `npm test` runs it alongside the project’s tests. `npm run test:tokensand:watch` rechecks the workflow when you save an imported project file. For files read from disk, list prompts or policies in `sourceFiles` and scoring fixtures in `evaluatorSourceFiles`, using paths relative to `observe.workflow.mjs`. For full Node diagnostics, run `npm run test:tokensand:watch -- --verbose`. Stop watching with Ctrl+C.
 
 Copy the replay for the first failing case. If another case hits its deadline, the checker also prints its replay. It runs that case at least three times and shows which instrumented tools returned, rejected, or were still running at the deadline. An unscored check needs attention even when another check already failed. Fix the failure, restore the missing score and rerun the full suite.
 

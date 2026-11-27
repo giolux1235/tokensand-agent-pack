@@ -64,6 +64,11 @@ async function watchWorkflow(runner) {
   runner = realpath.native(runner);
   const root = dirname(runner);
   const adapter = resolve(root, "observe.workflow.mjs");
+  const args = process.argv.slice(3);
+  const verbose = args.at(-1) === "--verbose";
+  if (verbose) args.pop();
+  const explicitReporter = process.execArgv.some(arg => arg === "--test-reporter" || arg.startsWith("--test-reporter="));
+  const execArgv = verbose || explicitReporter ? process.execArgv : [...process.execArgv, "--test-reporter=" + watchReporterUrl];
   const files = new Set([runner, adapter]);
   const directories = new Map();
   const polling = new Set();
@@ -178,7 +183,7 @@ async function watchWorkflow(runner) {
     }
     for (const file of files) attach(file);
     const used = new Set([runner, adapter]);
-    child = fork(runner, ["--report-workflow-imports", ...process.argv.slice(3)], { stdio: ["inherit","inherit","inherit","ipc"] });
+    child = fork(runner, ["--report-workflow-imports", ...args], { execArgv, stdio: ["inherit","inherit","inherit","ipc"] });
     child.on("message", message => {
       if (stopping || !["tokensand:watch-module", "tokensand:watch-source"].includes(message?.type)
           || typeof message.url !== "string" || !message.url.startsWith("file:")) return;
