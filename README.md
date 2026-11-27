@@ -53,15 +53,17 @@ To check a repair in your repo, ask your agent: “Check this change against the
 Use the same pinned private Node SDK for both runs. The reviewer recognizes 0.7.7 and 0.7.8. From a clean candidate checkout, choose the earlier release tag and its saved run. Declare the app code in `sourceFiles`. If the scorer changed, the reviewer flags the saved result for review.
 
 ```sh
-npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.23/tokensand-workflow-check-0.1.23.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
+npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.24/tokensand-workflow-check-0.1.24.tgz --review-release REFERENCE_RUN CANDIDATE_RUN --reference RELEASE_TAG --all-cases --note review.html
 ```
+
+If the selected case already failed in the earlier release, use the earlier checkout to score the saved outputs with its original checks. Run the same checker with `--review-repair REFERENCE_RUN CANDIDATE_RUN --case CASE_ID --original-checkout EARLIER_SERVICE`. If you only have the saved runs, omit `--original-checkout EARLIER_SERVICE` to compare the recorded scores.
 
 Open `review.html` to see the blocking cases, their scores and both Git revisions. Review the case names before sharing the note. Keep your run directories and private inputs and outputs on your machine.
 
 Save the note as `review.html` in the trusted candidate service checkout with both Git revisions available locally. This command also works with notes created by older checkers.
 
 ```sh
-npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.23/tokensand-workflow-check-0.1.23.tgz --recheck-release ./review.html --all-cases --run
+npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.24/tokensand-workflow-check-0.1.24.tgz --recheck-release ./review.html --all-cases --run
 ```
 
 This rechecks each case **in the note** using the earlier scorer. It repeats the recorded 3–10 trials per revision. A case without recorded counts starts with three. If the note covers fewer trials than the committed workflow, regenerate it after a full run. To narrow the selection, replace `--all-cases` with one or more `--case ID` flags. Self-contained workflows need no private SDK or account for replay. For offline use, install the pinned archive once and use `tokensand-check` in place of `npx --yes URL`.
