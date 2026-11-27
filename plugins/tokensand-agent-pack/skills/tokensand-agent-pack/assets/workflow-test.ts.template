@@ -1,0 +1,69 @@
+// @vitest-environment node
+// Save in src/test/tokensand-workflow.test.ts beside tokensand-case-ids.mjs.
+import { spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { test } from 'vitest';
+
+const require = createRequire(import.meta.url);
+const root = new URL('../../', import.meta.url);
+// Increase this for workflows whose full local suite intentionally takes longer.
+const suiteTimeout = 60_000;
+
+test('Tokens& offline workflow', { timeout: suiteTimeout }, async ({ signal, skip, expect }) => {
+  if (process.env.GITHUB_ACTIONS === 'true' &&
+      !['push', 'workflow_dispatch'].includes(process.env.GITHUB_EVENT_NAME ?? '')) {
+    skip('Use the isolated Tokens& PR check for this GitHub event.');
+    return;
+  }
+  if (!existsSync(new URL('observe.workflow.mjs', root))) {
+    throw new Error('Create observe.workflow.mjs around the changed app function with offline cases and a zero provider budget.');
+  }
+  let runner, countsReporter;
+  try {
+    runner = require.resolve('@tokensand/workflow-check/agent-check.mjs');
+    countsReporter = require.resolve('@tokensand/workflow-check/starter-pr.mjs');
+  } catch {
+    throw new Error('Install the pinned public @tokensand/workflow-check dev dependency from the Tokens& Lovable setup.');
+  }
+
+  const temporary = mkdtempSync(join(tmpdir(), 'tokensand-vitest-'));
+  const countsPath = join(temporary, 'counts.json');
+  const idsPath = join(temporary, 'ids.json');
+  try {
+    const env = { ...process.env, TOKENSAND_STARTER_COUNTS: countsPath };
+    Reflect.deleteProperty(env, 'NODE_TEST_CONTEXT');
+    const args = [
+      '--test-reporter=' + pathToFileURL(countsReporter).href, '--test-reporter-destination=stdout',
+      '--test-reporter=' + new URL('./tokensand-case-ids.mjs', import.meta.url).href,
+      '--test-reporter-destination=' + idsPath, runner, '--offline-workflow', './observe.workflow.mjs',
+    ];
+    // Run the checker once. Its validated counts reporter verifies the case and trial plan.
+    // App logs and exception messages stay out of the Vitest report.
+    const child = spawn(process.execPath, args, {
+      cwd: fileURLToPath(root), env, signal, timeout: suiteTimeout, stdio: 'ignore',
+    });
+    const status = await new Promise<number | null>(resolve => {
+      // close follows an abort or spawn error; wait for it before removing the private files.
+      child.on('error', () => {});
+      child.once('close', resolve);
+    });
+    if (!existsSync(countsPath) || !existsSync(idsPath)) {
+      throw new Error('No complete Tokens& result. Check the workflow, its imports and the suite timeout. Run the offline checker locally for details.');
+    }
+    const { passedCases, failedCases, unscoredCases } = JSON.parse(readFileSync(countsPath, 'utf8'));
+    const counts = `${passedCases} passed, ${failedCases} failed, ${unscoredCases} unscored`;
+    if (status !== 0 || failedCases || unscoredCases) {
+      const ids = JSON.parse(readFileSync(idsPath, 'utf8'));
+      const showIds = !process.env.CI && !process.env.GITHUB_ACTIONS && ids.length;
+      throw new Error(counts + (showIds ? '\nAffected cases: ' + JSON.stringify(ids) : ''));
+    }
+    expect(passedCases).toBeGreaterThan(0);
+    console.info(counts);
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
