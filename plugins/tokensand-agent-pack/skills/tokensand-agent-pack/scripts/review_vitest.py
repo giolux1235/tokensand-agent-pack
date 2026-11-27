@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Review proposed repairs against a fresh baseline from the same trusted Vitest 4 tests."""
+"""Review a trusted Vitest 4 repair. For release decisions, use --replay-original-tests to score the original expectations."""
 import argparse
 from collections import Counter
 import hashlib
@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from xml.etree.ElementTree import ParseError
 
 from review_pytest import Arguments, Invalid, execute, read_report, review_status, source_sha
 
@@ -42,6 +43,10 @@ def capture(root, args, directory):
     xml, receipt = directory / "results.xml", directory / "scope.json"
     env = {key: os.environ[key] for key in ("PATH", "HOME", "TMPDIR", "TEMP", "SystemRoot", "USERPROFILE", "LANG")
            if key in os.environ}
+    if args.replay_original_tests:
+        home = directory / "home"
+        home.mkdir(mode=0o700)
+        env.update(HOME=str(home), USERPROFILE=str(home), TMPDIR=str(home), TEMP=str(home))
     env.update(CI="1", NO_COLOR="1", TOKENSAND_VITEST_RECEIPT=str(receipt))
     command = ["node", str(package / "vitest.mjs"), "run", "--no-cache", "--no-update", "--allowOnly=false", "--includeTaskLocation",
                "--reporter=junit", "--reporter=" + str(REPORTER), "--outputFile.junit=" + str(xml)]
@@ -95,14 +100,7 @@ def capture(root, args, directory):
     return cases, controls, protected, issues, version, run.returncode
 
 
-def compare(args, earlier, later):
-    before, old, baseline_controls, first, v1, e1 = earlier
-    after, new, candidate_controls, last, v2, e2 = later
-    issues = list(dict.fromkeys(first + last))
-    if v1 != v2:
-        issues.append("The installed Vitest versions differ.")
-    protected = baseline_controls | candidate_controls
-    loaded = old.keys() | new.keys()
+def implementation_files(args, loaded, protected):
     implementation = set(args.implementation)
     if not implementation:
         # The adjacent module with the same name as a .test or .spec file is
@@ -115,6 +113,24 @@ def compare(args, earlier, later):
                 implementation.update(adjacent)
     if implementation & protected or implementation - loaded:
         raise Invalid("implementation files must be reached local modules, separate from tests and controls")
+    return implementation
+
+
+def case_name(key, show_names):
+    fingerprint = hashlib.sha256(json.dumps(key, ensure_ascii=True).encode()).hexdigest()[:12]
+    detail = [key[0] + (f":{key[3]}:{key[4]}" if key[3] else ""), key[1]]
+    return json.dumps(detail, ensure_ascii=True)[:500] if show_names else "case#" + fingerprint
+
+
+def compare(args, earlier, later, extra_issues=()):
+    before, old, baseline_controls, first, v1, e1 = earlier
+    after, new, candidate_controls, last, v2, e2 = later
+    issues = list(dict.fromkeys([*first, *last, *extra_issues]))
+    if v1 != v2:
+        issues.append("The installed Vitest versions differ.")
+    protected = baseline_controls | candidate_controls
+    loaded = old.keys() | new.keys()
+    implementation = implementation_files(args, loaded, protected)
     one_sided = implementation & (old.keys() ^ new.keys())
     changed_impl = {path for path in implementation - one_sided if old[path] != new[path]}
     if not implementation:
@@ -153,9 +169,7 @@ def compare(args, earlier, later):
         was, now = before.get(key, "absent"), after.get(key, "absent")
         if was == now == "passed":
             continue
-        fingerprint = hashlib.sha256(json.dumps(key, ensure_ascii=True).encode()).hexdigest()[:12]
-        detail = [key[0] + (f":{key[3]}:{key[4]}" if key[3] else ""), key[1]]
-        label = json.dumps(detail, ensure_ascii=True)[:500] if args.show_names else "case#" + fingerprint
+        label = case_name(key, args.show_names)
         transition = ""
         if key in recovered:
             transition = " (recovered)" if comparable else " (recovery unverified)"
@@ -173,7 +187,14 @@ def review(args):
     with tempfile.TemporaryDirectory(prefix="tokensand-vitest-") as work:
         base = Path(work) / "before"
         base.mkdir(mode=0o700)
+        if args.replay_original_tests:
+            from review_vitest_replay import UNKNOWN_INPUT, original_result, snapshot, tracked_changes
+            before_tree = snapshot(before)
         earlier = capture(before, args, base)
+        if not args.replay_original_tests:
+            from review_vitest_replay import filesystem_data
+            before_data = filesystem_data(before, earlier[1])
+        unavailable = set()
         seen = {before}
         decisions = []
         for index, proposal in enumerate(proposals, 1):
@@ -188,20 +209,62 @@ def review(args):
                 seen.add(root)
                 directory = Path(work) / str(index)
                 directory.mkdir(mode=0o700)
-                return compare(args, earlier, capture(root, args, directory))
+                if args.replay_original_tests:
+                    candidate_tree = snapshot(root)
+                later = capture(root, args, directory)
+                if not args.replay_original_tests:
+                    extra = []
+                    if before_data is not None:
+                        after_data = filesystem_data(root, later[1])
+                        if after_data is not None:
+                            data_drift = sorted(p for p in before_data.keys() | after_data.keys()
+                                                if before_data.get(p) != after_data.get(p))
+                            if data_drift:
+                                name = json.dumps(data_drift[0].as_posix(), ensure_ascii=True)
+                                extra.append("The suite uses filesystem access and an unbound tracked data file changed: " +
+                                             name + ". Review its role; declare expected data with --test-source FILE.")
+                    return compare(args, earlier, later, extra)
+                implementation = implementation_files(args, earlier[1].keys() | later[1].keys(), earlier[2] | later[2])
+                extra = []
+                if not before_tree.problem and not candidate_tree.problem:
+                    known = implementation | set(args.files) | set(args.test_source)
+                    if tracked_changes(before_tree, candidate_tree) - known:
+                        extra.append(UNKNOWN_INPUT)
+                print("Submitted tests")
+                status = compare(args, earlier, later, extra)
+                try:
+                    with tempfile.TemporaryDirectory(prefix="original-", dir=directory) as scratch:
+                        mode, after = original_result(args, before, root, before_tree, candidate_tree,
+                                                      earlier, later, Path(scratch), capture, implementation)
+                    failed = [key for key, state in after.items() if state == "failed"]
+                    print(f"Original tests ({mode}): {len(after)-len(failed)}/{len(after)} passed, {len(failed)} failed.")
+                    for key in sorted(failed):
+                        print("  Original failure: " + case_name(key, args.show_names))
+                except Invalid as error:
+                    print("Original tests: unavailable — " + str(error))
+                    unavailable.add(index)
+                except (OSError, ValueError, LookupError, RuntimeError, ParseError, subprocess.SubprocessError):
+                    print("Original tests: unavailable — could not verify the disposable checkout.")
+                    unavailable.add(index)
+                return status
 
             status = execute(review_proposal, args)
             decisions.append((label, status))
         if len(decisions) > 1:
             print("Release decision for the selected cases:")
-            for label, status in decisions:
-                print(f"  {label}: " + {0: "VERIFIED REPAIR", 100: "HOLD", 1: "INVALID"}[status])
+            for index, (label, status) in enumerate(decisions, 1):
+                verdict = {0: "VERIFIED REPAIR", 100: "HOLD", 1: "INVALID"}[status]
+                if index in unavailable:
+                    verdict = "ORIGINAL TESTS UNAVAILABLE (submitted: " + verdict + ")"
+                print(f"  {label}: " + verdict)
         statuses = [status for _, status in decisions]
         if any(status != 1 for status in statuses):
             if not args.show_names:
                 print("Use --show-names locally to display the test file and full case name.")
             print("Scope: selected tests, reached local modules, active settings and bound snapshots. Declare files read outside the module graph with --test-source.")
-        return 1 if 1 in statuses else max(statuses)
+            if not args.replay_original_tests:
+                print("For original-suite scores, add --replay-original-tests to this command.")
+        return 1 if unavailable or 1 in statuses else max(statuses)
 
 
 if __name__ == "__main__":
@@ -209,6 +272,8 @@ if __name__ == "__main__":
     parser.add_argument("--before-root", required=True, type=Path)
     parser.add_argument("--after-root", type=Path, action="append", metavar="CHECKOUT",
                         help="candidate checkout (default: current directory); repeat to review multiple proposals")
+    parser.add_argument("--replay-original-tests", action="store_true",
+                        help="also check the baseline tests and declared controls on each trusted candidate")
     parser.add_argument("--implementation", type=relative_path, action="append", default=[], metavar="FILE",
                         help="changed service module; the adjacent same-named module is recognized automatically")
     parser.add_argument("--config", type=relative_path, help="explicit Vitest config relative to each checkout")
