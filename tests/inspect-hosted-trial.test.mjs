@@ -172,7 +172,7 @@ test("pairs all repetitions, unions overlapping spans and uses a strict timing t
   assert.equal(s.comparableTrials, 3); assert.equal(s.plannedTrials, 3);
   assert.deepEqual(s.slowerTrialIds, [2, 3]);
   assert.deepEqual(s.trials.map(t => t.deltaMs), [5, 10, 15]);
-  assert.deepEqual(s.trials[0].baseline, { activeMs: 10, calls: 2 });
+  assert.deepEqual(s.trials[0].baseline, { activeMs: 10, calls: 2, failedCalls: 0 });
   assert.deepEqual(JSON.parse(f.invoke(["--tool", "lookup", "--min-delta-ms", "10"]).stdout).slowerTrialIds, [3]);
   assert.equal(f.invoke(["--trial", "2"]).status, 2);
 });
@@ -193,7 +193,7 @@ test("returns partial coverage with reasons and excludes missing, failed and cap
   partial(r => r.runs[0].toolSpans[0].name = "renamed", 1, "baseline", "tool not recorded");
   partial(r => r.runs[1].telemetryComplete = false, 1, "candidate", "incomplete telemetry");
   partial(r => r.runs[0].providerCalls++, 1, "baseline", "incomplete telemetry");
-  partial(r => r.runs[3].toolSpans[0].status = "error", 2, "baseline", "unfinished or failed tool call");
+  partial(r => r.runs[3].toolSpans.push({ ...r.runs[3].toolSpans[0], id: randomUUID(), name: "other", status: "interrupted" }), 2, "baseline", "interrupted tool timing");
   partial(r => r.runs[2].status = "timeout", 2, "candidate", "timeout");
   partial(r => r.runs[4].toolSpans = Array.from({ length: 32 }, () => ({ ...r.runs[4].toolSpans[0], id: randomUUID() })), 3, "baseline", "span limit reached");
   partial(r => { r.state = "interrupted"; r.runs.pop(); }, 3, "candidate", "missing trial");
@@ -212,4 +212,22 @@ test("refuses mixed selectors, invalid tolerances and malformed timing metadata"
   }
   const bad = f.read("result.json"); bad.runs[5].toolSpans[0].startMs = 9000; f.save("result.json", bad);
   const p = f.invoke(["--tool", "lookup"]); assert.equal(p.status, 2); assert.equal(p.stdout, "");
+});
+
+test("counts timed failed calls in recovered workflows and recognizes a faster repair", t => {
+  const f = fixture(t);
+  const r = f.read("result.json");
+  for (const row of r.runs.filter(row => row.variant === "baseline")) {
+    row.workflowMs = 25;
+    row.toolSpans[0].durationMs = row.repetition === 1 ? 15.000000000000004 : 20;
+    row.toolSpans[0].status = "error";
+  }
+  f.save("result.json", r);
+  const p = f.invoke(["--tool", "lookup"]); assert.equal(p.status, 0, p.stderr);
+  const out = JSON.parse(p.stdout);
+  assert.deepEqual(out.fasterTrialIds, [1, 3]); assert.deepEqual(out.slowerTrialIds, []);
+  assert.equal(out.comparableTrials, 3);
+  assert.deepEqual(out.trials[0].baseline, { activeMs: 20, calls: 1, failedCalls: 1 });
+  assert.equal(out.trials[0].candidate.failedCalls, 0);
+  assert.equal(out.trials[1].deltaMs, -5);
 });
