@@ -288,9 +288,6 @@ def read_variant_scores(command, timeout=None):
 def compare_baseline(workflow_path, selected):
     # Separate interpreters preserve within-variant state across repetitions without
     # letting one variant warm the other's cache or advance its application state.
-    if not workflow_path.is_file():
-        print(f"Workflow adapter not found: {workflow_path}", file=sys.stderr)
-        return 2
     initial_hash = hashlib.sha256(workflow_path.read_bytes()).digest()
     records = []
     for variant in ("baseline", "candidate"):
@@ -369,13 +366,25 @@ def main(argv):
             parser.error("--compare-baseline requires --offline-workflow PATH to your project adapter.")
         if args.inspect_values or args.verbose:
             parser.error("--compare-baseline reports changed checks. To inspect one arm, omit --compare-baseline and use --case CASE_ID --inspect-values --variant baseline or candidate. Use --verbose separately for detailed candidate output.")
-        return compare_baseline(args.offline_workflow[0], args.case or [])
     if args.inspect_values and len(args.case or []) != 1:
         parser.error("--inspect-values requires one --case CASE_ID.")
     if args.offline_workflow:
         if len(args.offline_workflow) != 1:
             parser.error("Supply one --offline-workflow path.")
-        definition = load_workflow(args.offline_workflow[0])
+        path = args.offline_workflow[0]
+        if not path.is_file():
+            print("No cases ran. Supply a Python workflow file from your project directory.", file=sys.stderr)
+            for name in ("workflow.py", "my_workflow.py"):
+                if Path(name).is_file():
+                    print(f"Found ./{name}. If this is your adapter, rerun with --offline-workflow ./{name}.", file=sys.stderr)
+                    break
+            else:
+                print("Pass its path with --offline-workflow, or create an adapter from this example.\n"
+                      "https://github.com/giolux1235/tokensand-agent-pack/blob/python-check-0.1.14/examples/incremental-sync.py", file=sys.stderr)
+            return 2
+        if args.compare_baseline:
+            return compare_baseline(path, args.case or [])
+        definition = load_workflow(path)
     else:
         definition = workflow
     try:
