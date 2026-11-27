@@ -28,7 +28,7 @@ def read_only(event, args):
         raise PermissionError("Read-only test checkout")
 sys.addaudithook(read_only)
 """)
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.13-py3-none-any.whl") as wheel:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.14-py3-none-any.whl") as wheel:
                 wheel.extractall(root / "installed")
             for command in ([sys.executable, str(SCRIPT)], [sys.executable, "-m", "tokensand_check"]):
                 with self.subTest(command=command[-1]):
@@ -44,7 +44,7 @@ sys.addaudithook(read_only)
     def test_installed_and_standalone_runners_match_the_same_baseline(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.13-py3-none-any.whl") as wheel:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.14-py3-none-any.whl") as wheel:
                 self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
                 wheel.extractall(root / "package")
             adapter = ROOT / "examples/incremental-sync.py"
@@ -127,7 +127,7 @@ workflow = {
             self.assertEqual(source.count(marker), 1)
             edited.write_text(source.replace(marker, adapter + marker))
             original = edited.read_bytes()
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.13-py3-none-any.whl") as current:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.14-py3-none-any.whl") as current:
                 current.extractall(project / "wheel")
             for guide, command in documented:
                 with self.subTest(guide=guide.name):
@@ -139,8 +139,54 @@ workflow = {
                     self.assertEqual(run.stderr.count("TypeError: candidate returned an unfinished async result"), 3)
                     self.assertEqual(edited.read_bytes(), original)
 
+    def test_documented_variant_inspection_in_wheel_and_agent_pack(self):
+        import json
+        prefix = "--offline-workflow ./my_workflow.py --case CASE_ID --inspect-values --variant baseline"
+        self.assertIn("python3 -m tokensand_check " + prefix, (ROOT / "README.md").read_text())
+        self.assertIn('python3 "$SKILL_DIR/scripts/check_workflow.py" ' + prefix,
+                      (SCRIPT.parents[1] / "SKILL.md").read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter = root / "my_workflow.py"
+            adapter.write_text("""
+workflow = {
+    "cases": [{"id": "counter", "input": {"expected": "private_repaired"}}],
+    "checks": [{"id": "counter_correct"}],
+    "baseline": lambda item: "private_broken",
+    "candidate": lambda item: item["expected"],
+    "evaluate": lambda item, output, variant: {"counter_correct": output == item["expected"]},
+}
+""")
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.14-py3-none-any.whl") as wheel:
+                wheel.extractall(root / "installed")
+            for entry in [[str(SCRIPT)], ["-m", "tokensand_check"]]:
+                for arm, extra, code in [("candidate", [], 0), ("baseline", ["--variant", "baseline"], 1)]:
+                    with self.subTest(entry=entry, arm=arm):
+                        run = subprocess.run(
+                            [sys.executable, *entry, "--offline-workflow", str(adapter), "--case", "counter", "--inspect-values", *extra],
+                            cwd=root, env={**os.environ, "TMPDIR": str(root), "PYTHONPATH": str(root / "installed")},
+                            text=True, capture_output=True, timeout=10,
+                        )
+                        self.assertEqual(run.returncode, code, run.stderr)
+                        output = run.stdout + run.stderr
+                        self.assertIn(f"Replay variant: {arm} (fresh local run)", output)
+                        self.assertNotIn("private_broken", output)
+                        self.assertNotIn("private_repaired", output)
+                        file = Path(next(line.removeprefix("Private case values: ") for line in run.stdout.splitlines()
+                                         if line.startswith("Private case values: ")))
+                        self.assertEqual(file.parent.resolve(), root.resolve())
+                        self.assertEqual(file.stat().st_mode & 0o077, 0)
+                        values = [json.loads(line) for line in file.read_text().splitlines()]
+                        self.assertEqual(len(values), 3)
+                        for value in values:
+                            self.assertEqual(set(value), {"trial", "expected", "actual", *(["variant"] if extra else [])})
+                            self.assertEqual(value["actual"], repr("private_broken" if extra else "private_repaired"))
+                            if extra:
+                                self.assertEqual(value["variant"], "baseline")
+                        file.unlink()
+
     def test_shipped_runner(self):
-        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.13-py3-none-any.whl") as wheel:
+        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.14-py3-none-any.whl") as wheel:
             self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
         for repair, outage, code, message in [
             ("0", "0", 1, "Failed checks: Return every remaining record"),

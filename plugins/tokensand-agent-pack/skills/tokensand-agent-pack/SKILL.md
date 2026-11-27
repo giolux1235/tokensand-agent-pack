@@ -29,6 +29,8 @@ The skill bundles two local runners. Resolve `SKILL_DIR` to the directory contai
 - Python workflow dictionary: `python3 SKILL_DIR/scripts/check_workflow.py --offline-workflow ./my_workflow.py`. If the adapter returns an unfinished async operation, await the agent call or collect its stream inside the adapter and rerun the original cases.
 - To answer “What did this change break?”, add `--compare-baseline` to the Python command when the trusted offline adapter has baseline and candidate callbacks and JSON fixtures. This works in read-only sessions. Report new failures, recoveries and inherited failures. For an unscored pair, name the missing side and any known failure. Setup or fixture drift exits 2.
 
+For a requested Python baseline inspection, run `python3 "$SKILL_DIR/scripts/check_workflow.py" --offline-workflow ./my_workflow.py --case CASE_ID --inspect-values --variant baseline` from the trusted service. Omit `--variant` for the candidate. Name the selected arm, case and failed checks. Keep the file of final trial values local. Describe the result as a fresh replay. For a historical run, read the owner’s saved outputs first.
+
 Read repeated Python scores by case and check. Use `--verbose` for individual trial reports. An unscored check needs investigation. Use a separately named prerequisite check to substantiate a missing annotation.
 
 If the service has an edited `test_tokensand_first.py`, keep its cases. After a skill upgrade, set `SKILL_DIR` to this skill’s directory and run `python3 "$SKILL_DIR/scripts/check_workflow.py" --offline-workflow ./test_tokensand_first.py` to use the installed runner.
