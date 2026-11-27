@@ -51,6 +51,8 @@ With the skill installed, give your coding agent the public `tokensand.com/p/…
 
 The agent follows the project’s **Repo** link and tests the edition linked from its page in a separate checkout. If the page has no pinned edition, it reports the revision it ran from the default branch. **Check your own project** starts setup for your own app.
 
+To check a repair in your own repo, ask your agent: “Check this change against the last release. Tell me if a case disappeared, which checks fail, and whether the fix passes.” The agent can replay the original case IDs with the local Node or Python checker. Supply the earlier revision when it would be ambiguous.
+
 ### Review a release with a teammate
 
 Use the same pinned private Node SDK for both runs. The reviewer recognizes 0.7.7 and 0.7.8. From a clean candidate checkout, choose the earlier release tag and its saved run. Declare the app code in `sourceFiles`. If the scorer changed, the reviewer flags the saved result for review.
