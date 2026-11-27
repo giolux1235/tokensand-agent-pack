@@ -80,6 +80,59 @@ class NativeReview(unittest.TestCase):
         self.assertIn("test_worker.py", result)
         self.assertNotIn("(recovered)", result)
 
+    def test_inherited_test_uses_its_defining_file_and_preserves_explicit_source(self):
+        target = "test_worker.py::TestWorker::test_retry"
+        imported = Path("common checks") / "expectations.py"
+        strict = ("from worker import deliveries\n\nclass DeliveryChecks:\n"
+                  "    def test_retry(self):\n        assert deliveries([1, 1]) == [1]\n")
+        for root in (self.before, self.after):
+            (root / imported.parent).mkdir()
+            (root / imported).write_text(strict)
+            (root / "pytest.ini").write_text("[pytest]\npythonpath = \"common checks\"\n")
+            (root / "test_worker.py").write_text("from unittest import TestCase\n"
+                                                  "from expectations import DeliveryChecks\n"
+                                                  "class TestWorker(DeliveryChecks, TestCase): pass\n")
+            # Ordinary project modules with these names must never supply the reviewer.
+            for filename in ("capture_pytest.py", "tokensand_pytest_definitions.py"):
+                (root / filename).write_text("raise AssertionError('wrong module loaded')\n")
+        actual = self.review(0, target)
+        self.assertIn("failed -> passed (recovered)", actual)
+        self.assertIn('defining test source "common checks/expectations.py"', actual)
+        declared = self.review(0, "--test-source", str(imported), target)
+        self.assertEqual(declared.count('"common checks/expectations.py"'), 1)
+
+        self.worker(self.after, fixed=False)
+        (self.after / imported).write_text(strict.replace("== [1]", "== [1, 1]"))
+        held = self.review(100, target)
+        self.assertIn('defining test source "common checks/expectations.py"', held)
+        self.assertIn("(changed)", held)
+        self.assertIn("failed -> passed", held)
+        self.assertNotIn("(recovered)", held)
+
+    def test_generated_or_ambiguous_test_location_holds(self):
+        target = "test_worker.py::test_dynamic"
+        for root in (self.before, self.after):
+            (root / "test_worker.py").write_text("exec(compile('def test_dynamic(): pass', '<generated>', 'exec'))\n")
+        missing = self.review(100, target)
+        self.assertIn("could not identify a checkout-local python test definition", missing)
+
+        for root in (self.before, self.after):
+            (root / "test_worker.py").write_text("def test_dynamic(): pass\n")
+            (root / "conftest.py").write_text(
+                "from pathlib import Path\n"
+                "def pytest_collection_modifyitems(items):\n"
+                "    for item in items:\n"
+                "        item.reportinfo = lambda: (Path(__file__), 2, 'location')\n")
+        ambiguous = self.review(100, target)
+        self.assertIn("could not identify a checkout-local python test definition", ambiguous)
+
+    def test_a_standard_library_decorator_keeps_the_checkout_test(self):
+        for root in (self.before, self.after):
+            (root / "test_worker.py").write_text(
+                "from unittest.mock import patch\nfrom worker import deliveries\n"
+                "@patch('os.getcwd')\ndef test_retry(mocked):\n    assert deliveries([1, 1]) == [1]\n")
+        self.assertIn("failed -> passed (recovered)", self.review(0, TARGET))
+
     def test_empty_and_missing_selections_are_setup_errors(self):
         for root in (self.before, self.after):
             (root / "test_empty.py").write_text("# no tests in this module\n")
