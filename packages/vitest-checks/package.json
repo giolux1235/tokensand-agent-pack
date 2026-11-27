@@ -1,0 +1,24 @@
+{
+  "name": "@tokensand/vitest-checks",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Connect one trusted Vitest workflow file to private Tokens& repository checks.",
+  "exports": "./reporter.mjs",
+  "bin": {
+    "tokensand-vitest": "./cli.mjs"
+  },
+  "peerDependencies": {
+    "vitest": "~4.1.0"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
+  },
+  "files": [
+    "reporter.mjs",
+    "cli.mjs",
+    "bridge.py",
+    "repository_transport.py",
+    "README.md",
+    "LICENSE"
+  ]
+}

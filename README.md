@@ -104,6 +104,10 @@ Claude Code can use `$HOME/.claude/skills` instead. For a project-local install 
 
 Each side runs fresh in CI mode with snapshot updates disabled and application environment variables omitted. Exit 0 verifies an ordinary failing case recovered with the same named cases, checked inputs and a fully passing candidate. Exit 100 holds the decision. Exit 1 means unusable setup or evidence. Results cover the selected files in one project. The reviewer checks reached local Vite modules, active config and setup, package manifests, standard snapshots and directly named file snapshots. A changed helper or a dynamic file snapshot holds the decision. Arbitrary filesystem reads, external packages and environment-dependent behavior need separate review. Use trusted offline suites; the runner does not sandbox their network or filesystem access. The reviewer sends no data.
 
+### Connect existing Vitest results to my private app
+
+Enable **Repository checks** in your [private app](https://tokensand.com/dashboard/agents?mode=developer&setup=repo). Install the [Vitest reporter](packages/vitest-checks/README.md), keep your existing reporters, and select one trusted acceptance-test file. Future full `npm test` runs send its ordinary pass/fail counts. Local repair reviews stay local.
+
 ### Review an existing Python test
 
 From the later checkout, ask Codex or Claude Code to run the same pytest target against the earlier checkout and show which cases recovered. With the global skill installed, you can also run one command.
