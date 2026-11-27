@@ -2,6 +2,22 @@
 
 Check an AI workflow change in your repository and see which cases failed.
 
+## Check a change with Codex or Claude Code
+
+Install the skill once for both coding agents.
+
+```sh
+npx --yes skills@1.9.0 add giolux1235/tokensand-agent-pack --skill tokensand-agent-pack --agent codex claude-code --global --yes
+```
+
+In a new agent session, open the repository and ask for a check.
+
+> Use Tokens& to check this change and show me what failed.
+
+The agent runs your existing offline workflow tests and names the failing cases. Local checks need no Tokens& account or provider key. If your project has no covering test yet, start with [a local example](https://tokensand.com/agents/install#first-local-check).
+
+For a single-repository install, omit `--global` and run the install command from that repository. Choose just one host by passing `--agent codex` or `--agent claude-code`.
+
 ## Install automatic workflow checks
 
 With your npm project open in Codex or Claude Code, paste this once.
@@ -22,28 +38,7 @@ When a case fails, copy the replay command printed by the checker. It runs that 
 
 GitHub runs self-contained cases on pull requests and default-branch pushes. The job has read-only repository access, with networking disabled during evaluation. Its summary shows case counts and the tested revision. Omit `--github` for a local-only install or a service inside a monorepo. To disconnect, revert the setup changes.
 
-
-## Check a change with Codex or Claude Code
-
-To make the skill available in every local project, install it once for both hosts:
-
-```sh
-npx --yes skills@1.9.0 add giolux1235/tokensand-agent-pack --skill tokensand-agent-pack --agent codex claude-code --global --yes
-```
-
-To limit the skill to one repository, run this from that project directory.
-
-```sh
-npx --yes skills@1.9.0 add giolux1235/tokensand-agent-pack --skill tokensand-agent-pack --agent codex -y
-```
-
-For Claude Code, replace `--agent codex` with `--agent claude-code`. Open a new agent session in the repository and ask:
-
-> Use Tokens& to check this change and show me what failed.
-
-Local checks run without an account, provider key or MCP connection. If you have no workflow tests, try the challenge below or run the [first local check](https://tokensand.com/agents/install#first-local-check).
-
-### Run a shared Tokens& project
+## Run a shared Tokens& project
 
 With the skill installed, give your coding agent the public `tokensand.com/p/…` link and ask:
 
