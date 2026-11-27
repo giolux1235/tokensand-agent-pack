@@ -12,6 +12,54 @@ SCRIPT = ROOT / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/script
 
 
 class PythonRelease(unittest.TestCase):
+    def test_missing_adapter_points_to_an_existing_file_or_the_template_without_running_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            wrong = root / "my_workflow.py"
+            for mode in ([], ["--compare-baseline"], ["--case", "initial", "--inspect-values"]):
+                for available in (False, True):
+                    with self.subTest(mode=mode, available=available):
+                        known = root / "workflow.py"
+                        if available:
+                            known.write_text("raise RuntimeError('unselected adapter executed')\n")
+                            wrong.mkdir()  # A directory is not a workflow even when its name ends in .py.
+                        run = subprocess.run([sys.executable, "-I", "-B", SCRIPT, "--offline-workflow", wrong, *mode],
+                                             cwd=root, capture_output=True, text=True)
+                        self.assertEqual(run.returncode, 2)
+                        self.assertEqual(run.stdout, "")
+                        self.assertIn("No cases ran", run.stderr)
+                        self.assertIn("--offline-workflow ./workflow.py" if available else "examples/incremental-sync.py", run.stderr)
+                        self.assertNotIn("Traceback", run.stderr)
+                        self.assertNotIn(directory, run.stderr)
+                        self.assertNotIn("unselected adapter", run.stderr)
+                        if available:
+                            known.unlink()
+                            wrong.rmdir()
+
+    def test_existing_adapter_keeps_its_native_debug_details_and_private_compare_behavior(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            file = root / "workflow.py"
+            for body, error, detail in [
+                ("import tokensand_test_missing_package", "ModuleNotFoundError", "tokensand_test_missing_package"),
+                ("open('test-private-invoice.json')", "FileNotFoundError", "test-private-invoice.json"),
+            ]:
+                file.write_text(body)
+                for mode in ([], ["--case", "initial", "--inspect-values"], ["--compare-baseline"]):
+                    with self.subTest(error=error, mode=mode):
+                        run = subprocess.run([sys.executable, "-I", "-B", SCRIPT, "--offline-workflow", file, *mode],
+                                             cwd=root, capture_output=True, text=True)
+                        self.assertEqual(run.stdout, "")
+                        self.assertNotIn("No cases ran", run.stderr)
+                        if mode == ["--compare-baseline"]:
+                            self.assertEqual(run.returncode, 2)
+                            self.assertIn("Could not score the baseline", run.stderr)
+                            self.assertNotIn(detail, run.stderr)
+                        else:
+                            self.assertEqual(run.returncode, 1)
+                            self.assertIn(error, run.stderr)
+                            self.assertIn(detail, run.stderr)
+
     def test_paired_check_runs_with_all_file_writes_denied(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -28,7 +76,7 @@ def read_only(event, args):
         raise PermissionError("Read-only test checkout")
 sys.addaudithook(read_only)
 """)
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.14-py3-none-any.whl") as wheel:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.15-py3-none-any.whl") as wheel:
                 wheel.extractall(root / "installed")
             for command in ([sys.executable, str(SCRIPT)], [sys.executable, "-m", "tokensand_check"]):
                 with self.subTest(command=command[-1]):
@@ -44,7 +92,7 @@ sys.addaudithook(read_only)
     def test_installed_and_standalone_runners_match_the_same_baseline(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.14-py3-none-any.whl") as wheel:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.15-py3-none-any.whl") as wheel:
                 self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
                 wheel.extractall(root / "package")
             adapter = ROOT / "examples/incremental-sync.py"
@@ -127,7 +175,7 @@ workflow = {
             self.assertEqual(source.count(marker), 1)
             edited.write_text(source.replace(marker, adapter + marker))
             original = edited.read_bytes()
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.14-py3-none-any.whl") as current:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.15-py3-none-any.whl") as current:
                 current.extractall(project / "wheel")
             for guide, command in documented:
                 with self.subTest(guide=guide.name):
@@ -157,7 +205,7 @@ workflow = {
     "evaluate": lambda item, output, variant: {"counter_correct": output == item["expected"]},
 }
 """)
-            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.14-py3-none-any.whl") as wheel:
+            with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.15-py3-none-any.whl") as wheel:
                 wheel.extractall(root / "installed")
             for entry in [[str(SCRIPT)], ["-m", "tokensand_check"]]:
                 for arm, extra, code in [("candidate", [], 0), ("baseline", ["--variant", "baseline"], 1)]:
@@ -186,7 +234,7 @@ workflow = {
                         file.unlink()
 
     def test_shipped_runner(self):
-        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.14-py3-none-any.whl") as wheel:
+        with ZipFile(ROOT / "packages/tokensand_workflow_check-0.1.15-py3-none-any.whl") as wheel:
             self.assertEqual(wheel.read("tokensand_check_starter.py"), SCRIPT.read_bytes())
         for repair, outage, code, message in [
             ("0", "0", 1, "Failed checks: Return every remaining record"),
