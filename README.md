@@ -258,11 +258,27 @@ Try the [SQLite sync example](examples/incremental-sync.py) as `my_workflow.py`.
 
 ### Check a Lovable project
 
-Reviewing a shared preview? Give the maintainer the failing action and expected result. To replay it in Tokens&, use the [synced repository](https://docs.lovable.dev/integrations/github) and the commit that produced the preview.
+In Lovable, open [Personal skills](https://lovable.dev/settings/personal-skills), choose **Import skills**, and paste this public skill directory. Import it once in each workspace where you want to use it.
 
-Open your [GitHub-synced Lovable project](https://docs.lovable.dev/integrations/github) in Codex or Claude Code. A local check needs no Tokens& account, gateway key or skill install. Copy this request into the agent:
+```text
+https://github.com/giolux1235/tokensand-agent-pack/tree/main/plugins/tokensand-agent-pack/skills/tokensand-agent-pack
+```
 
-> Use Tokens& to check my change locally. Run the existing offline workflow test if it covers this change. Otherwise create observe.workflow.mjs around the changed app function with synthetic model replies or tool results, expected outcomes, named checks and a zero provider budget, then run npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.31/tokensand-workflow-check-0.1.31.tgz --offline-workflow ./observe.workflow.mjs. Show which cases failed and why.
+In project chat, ask:
+
+> /tokensand-agent-pack Check this change. Show which cases failed, then use the same cases to check my fix.
+
+To include a Tokens& check in future full frontend test runs, ask **“Run my Tokens& workflow with the app’s frontend tests.”** Keep the generated test, its reporter, `observe.workflow.mjs` and the updated package files with the app. Requires Vitest 3.2+ with a Node worker. Local checks need no Tokens& account or ingestion key. [Frontend testing in Lovable](https://docs.lovable.dev/features/testing#frontend-tests)
+
+The native test shows failing case IDs locally and aggregate counts in CI. It skips GitHub pull requests. For PR coverage, use the [isolated GitHub workflow](#review-a-pull-request).
+
+In a [GitHub-synced checkout](https://docs.lovable.dev/integrations/github), Codex or Claude Code can also run the workflow from the app directory:
+
+```sh
+npx --yes https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.31/tokensand-workflow-check-0.1.31.tgz --offline-workflow ./observe.workflow.mjs
+```
+
+Reviewing a shared preview? Give the maintainer the failing action and expected result.
 
 Before connecting a Node workflow, check the tool and step labels reached by its candidate cases:
 
