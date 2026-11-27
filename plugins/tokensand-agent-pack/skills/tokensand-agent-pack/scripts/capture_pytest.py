@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Run this checkout's pytest once and record its private native outcomes for review."""
 from collections import Counter, defaultdict
+from importlib.machinery import all_suffixes
 import hashlib
 import json
 import os
 from pathlib import Path
 import sys
+from types import ModuleType
 
 
 def stage_outcome(report):
@@ -28,8 +30,70 @@ def stage_outcome(report):
     return None
 
 
+IMPORT_SUFFIXES = tuple(all_suffixes())
+
+
+class ProjectImports:
+    """Verify observed imports that correspond to Python modules in either checkout."""
+
+    def __init__(self):
+        self.root = Path.cwd().resolve()
+        peer = os.environ.get("TOKENSAND_PYTEST_PEER_ROOT")
+        self.peer = Path(peer).resolve() if peer else None
+        roots = [self.root] + ([self.peer] if self.peer else [])
+        # An explicitly shared interpreter may supply third-party dependencies from
+        # its installed libraries inside the other checkout.
+        self.libraries = [Path(entry).resolve() for entry in sys.path
+                          if isinstance(entry, str) and Path(entry).name in {"site-packages", "dist-packages"}]
+        dirs = {".", "src", *json.loads(os.environ.get("TOKENSAND_PYTEST_SOURCE_DIRS", "[]"))}
+        self.bases = [(root, root / name) for root in roots for name in dirs if (root / name).is_dir()]
+        self.top_names = {entry.name if entry.is_dir() else entry.name.split(".")[0]
+                          for _, base in self.bases for entry in base.iterdir()}
+        self.checked = set()
+
+    def matches_checkout(self, name, filename):
+        origin = Path(filename).resolve() if filename and Path(filename).is_absolute() else None
+        if self.peer and origin and origin.is_relative_to(self.peer):
+            under_own_nested_root = self.root.is_relative_to(self.peer) and origin.is_relative_to(self.root)
+            if not under_own_nested_root and not any(origin.is_relative_to(path) for path in self.libraries):
+                return False
+        if name.partition(".")[0] not in self.top_names:
+            return True
+        relative = Path(*name.split("."))
+        project_module = False
+        for root, base in self.bases:
+            for stem in (base / relative, base / relative / "__init__"):
+                for suffix in IMPORT_SUFFIXES:
+                    candidate = Path(str(stem) + suffix)
+                    if candidate.is_file():
+                        project_module = True
+                        if root == self.root and origin and origin.is_relative_to(root) and candidate.resolve() == origin:
+                            return True
+        # Namespace extensions and ordinary third-party modules are independent dependencies.
+        return not project_module
+
+    def conflicts(self):
+        for name, module in sys.modules.copy().items():
+            if module is None or not isinstance(name, str) or name == "__main__":
+                continue
+            # Reading module globals directly avoids executing custom __getattr__ hooks.
+            attrs = ModuleType.__getattribute__(module, "__dict__") if isinstance(module, ModuleType) else {}
+            spec = attrs.get("__spec__")
+            filename = getattr(spec, "origin", None) or attrs.get("__file__")
+            key = (name, filename if isinstance(filename, str) else None)
+            if key not in self.checked:
+                self.checked.add(key)
+                try:
+                    if not self.matches_checkout(*key):
+                        return True
+                except (OSError, RuntimeError):
+                    return True
+        return False
+
+
 class NativeReports:
     def __init__(self):
+        self.project_imports = ProjectImports()
         self.selected = Counter()
         self.started = Counter()
         self.finished = Counter()
@@ -56,6 +120,9 @@ class NativeReports:
                     self.issues.add("incomplete")
             except (OSError, RuntimeError):
                 self.issues.add("incomplete")
+        # Rewritten pytest modules retain asserts, but their ordinary imported helpers may not.
+        if sys.flags.optimize:
+            self.issues.add("disabled_assertions")
         if config.getoption("runxfail", default=False):
             self.issues.add("runxfail")
         if not config.pluginmanager.hasplugin("skipping"):
@@ -64,7 +131,12 @@ class NativeReports:
                 config.getoption("dist", default="no") != "no" or hasattr(config, "workerinput")):
             self.issues.add("distributed")
 
+    def check_imports(self):
+        if "foreign_import" not in self.issues and self.project_imports.conflicts():
+            self.issues.add("foreign_import")
+
     def pytest_collection_finish(self, session):
+        self.check_imports()
         self.selected.update(item.nodeid for item in session.items)
 
     def pytest_deselected(self, items):
@@ -79,6 +151,9 @@ class NativeReports:
         self.started[nodeid] += 1
 
     def pytest_runtest_logreport(self, report):
+        if report.when == "call":
+            # Fixture teardown can unload modules that were used by the test body.
+            self.check_imports()
         if self.started[report.nodeid] != 1 or self.finished[report.nodeid]:
             self.issues.add("incomplete")
         if hasattr(report, "node") or hasattr(report, "worker_id"):
@@ -97,6 +172,7 @@ class NativeReports:
         self.finished[nodeid] += 1
 
     def summary(self, exit_code):
+        self.check_imports()
         cases = []
         selected = set(self.selected)
         if not selected:

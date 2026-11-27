@@ -88,6 +88,8 @@ The reviewer runs pytest once per checkout. It holds unexpected passes, skipped 
 
 The reviewer compares the selected tests, ancestor `conftest.py` files and active pytest configuration. Add imported fixtures, data or additional configuration with `--test-source PATH`.
 
+For a shared editable environment, the reviewer checks that project modules load from the checkout being tested. It holds the decision when a module loads from the wrong checkout.
+
 If you already have JUnit XML, the existing report-only command still works.
 
 ```sh
@@ -95,6 +97,19 @@ python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_pytest.py" bef
 ```
 
 XML can report a non-strict unexpected pass as an ordinary pass. Use the native run for that decision. [pytest expected-failure behavior](https://docs.pytest.org/en/stable/how-to/skipping.html#strict-parameter)
+
+### Show my existing pytest results in Tokens&
+
+Open **Repository checks** in your [private app](https://tokensand.com/dashboard/agents?mode=developer&setup=repo) and enable it. In the Python environment that already runs your workflow tests, use the app’s `TOKENS_OBSERVE_INGEST_URL` and `TOKENS_OBSERVE_API_KEY`. Run these commands once from your trusted checkout, replacing `APP_ID` and the file path.
+
+```sh
+python -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/pytest-checks-0.1.0/tokensand_pytest_checks-0.1.0-py3-none-any.whl
+python -m tokensand_pytest connect APP_ID tests/test_workflow.py
+```
+
+Run pytest as usual. When the whole selected file reports ordinary pass/fail outcomes, the terminal shows a receipt ID. Your private app shows its counts. Case names and tracebacks stay in your terminal. This requires Python 3.10+ and pytest 7+. If this workflow already sends Tokens& checks, keep its existing reporter.
+
+For offline delivery, add `--queue-offline` when connecting. The next connected check or `python -m tokensand_pytest sync` retries counts for up to seven days. Run `python -m tokensand_pytest disconnect` to stop reporting from this checkout and discard its pending counts. A new checkout needs its own connection.
 
 ### Run a local check without installing a package
 

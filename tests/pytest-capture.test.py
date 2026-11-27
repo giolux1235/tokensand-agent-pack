@@ -186,11 +186,11 @@ def test_compound(broken): assert False
         (self.root / "summary.json").unlink()
         result, _ = self.capture("def test_same(): pass\n", conftest="""
 import pytest
-@pytest.hookimpl(wrapper=True)
+@pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
-    report = yield
+    outcome = yield
+    report = outcome.get_result()
     if report.when == "call": report.outcome = "rerun"
-    return report
 """)
         self.assertIn("unsupported", result["issues"])
 

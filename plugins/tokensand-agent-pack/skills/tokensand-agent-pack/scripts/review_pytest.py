@@ -208,7 +208,8 @@ def verdict(before, after, sources, *, pytest_exits=None, issues=()):
             print("A strict unexpected pass fails the native pytest policy.")
         if outcomes & {"xpassed", "xpassed-strict"}:
             print("An expected failure passed its assertion. Review the expectation and rerun both revisions under the same policy.")
-        print("Local runs. The decision covers the selected cases and compared test sources. Declare imported fixtures and data with --test-source.")
+        print("Local runs cover the selected cases and compared tests. Pytest checks imports from the other checkout "
+              "and module origins in the root and selected src trees. Declare imported fixtures and data with --test-source.")
     else:
         print(SCOPE + " With both checkouts, use --run for native pytest outcomes.")
     return 0 if eligible else 100
@@ -236,7 +237,7 @@ def native_interpreter(root, override):
     return Path(sys.executable)
 
 
-def interpreter_environment(interpreter):
+def interpreter_environment(interpreter, root, peer, source_dirs):
     env = os.environ.copy()
     old_venv = env.pop("VIRTUAL_ENV", None)
     directories = os.get_exec_path(env)
@@ -249,12 +250,31 @@ def interpreter_environment(interpreter):
     if (venv / "pyvenv.cfg").is_file():
         env["VIRTUAL_ENV"] = str(venv)
         env.pop("PYTHONHOME", None)
+    # Bind ordinary src-layout imports for this interpreter and its Python children.
+    # A shared editable install or PYTHONPATH can otherwise load one revision twice.
+    paths = env["PYTHONPATH"].split(os.pathsep) if "PYTHONPATH" in env else []
+    peer_paths = {peer, peer / "src"}
+    paths = [entry for entry in paths if (root / entry).resolve() not in peer_paths]
+    source = root / "src"
+    if source.is_dir() and not (source / "__init__.py").is_file():
+        paths.insert(0, str(source))
+    if paths:
+        env["PYTHONPATH"] = os.pathsep.join(paths)
+    else:
+        env.pop("PYTHONPATH", None)
+    env["TOKENSAND_PYTEST_PEER_ROOT"] = str(peer)
+    env["TOKENSAND_PYTEST_SOURCE_DIRS"] = json.dumps(source_dirs)
     return env
 
 
 NATIVE_ISSUES = {
     "runxfail": "--runxfail disabled expected-failure handling. Rerun with the project's normal marker policy.",
     "distributed": "Distributed coverage is unavailable. Use a single pytest worker for this review.",
+    "disabled_assertions": "Python optimization can remove assertions in tests or imported helpers, even with pytest "
+                           "assertion rewriting. Unset PYTHONOPTIMIZE and rerun both checkouts with ordinary Python.",
+    "foreign_import": "A project module loaded from outside this checkout’s source. Remove shared project paths "
+                      "from pytest configuration or install the project with python -m pip install -e . in each checkout’s "
+                      "own .venv, then rerun.",
     "external_config": "The active pytest configuration is outside its checkout.",
     "deselected": "Pytest deselected cases. Check the selection and the project’s default options.",
     "collection_error": "Pytest could not collect the target. Run the target directly for its collection error.",
@@ -268,13 +288,14 @@ NATIVE_ISSUES = {
 }
 
 
-def native_run(root, interpreter, targets, destination, arm):
+def native_run(root, peer, interpreter, targets, destination, arm, source_dirs):
     if not interpreter.is_file():
         raise Invalid(f"The {arm} interpreter is missing. Set --{arm}-python to this checkout’s Python with pytest installed.")
     helper = Path(__file__).with_name("capture_pytest.py").resolve(strict=True)
     # The child uses the project's own environment. Test output and marker reasons stay private.
-    result = subprocess.run([str(interpreter), str(helper), str(destination), *targets], cwd=root, env=interpreter_environment(interpreter),
-                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = subprocess.run([str(interpreter), str(helper), str(destination), *targets], cwd=root,
+                            env=interpreter_environment(interpreter, root, peer, source_dirs), stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not destination.is_file():
         raise Invalid(f"The {arm} run produced no native result. Check --{arm}-python and run the selection locally with python -m pytest.")
     if destination.stat().st_size > LIMIT:
@@ -332,12 +353,18 @@ def run_review(args):
         if any(not (root / path).is_file() or not (root / path).resolve().is_relative_to(root) for root in roots):
             raise Invalid("A selected file is missing or outside its checkout. Select a file present in both revisions.")
         files.append(path)
-    sources = test_sources(roots, files + args.test_source)
+    declared = files + args.test_source
+    sources = test_sources(roots, declared)
+    # Selected tests and declared helpers identify service source trees in a monorepo.
+    source_dirs = sorted({str(parent / "src") for path in declared for parent in path.parents
+                          if any((root / parent / "src").is_dir() for root in roots)})
     with tempfile.TemporaryDirectory(prefix="tokensand-pytest-") as temp:
-        before, first_issues, before_exit, before_config, before_digest = native_run(roots[0], native_interpreter(roots[0], args.before_python),
-                                         args.targets, Path(temp, "before.json"), "before")
-        after, last_issues, after_exit, after_config, after_digest = native_run(roots[1], native_interpreter(roots[1], args.after_python),
-                                       args.targets, Path(temp, "after.json"), "after")
+        before, first_issues, before_exit, before_config, before_digest = native_run(
+            roots[0], roots[1], native_interpreter(roots[0], args.before_python),
+            args.targets, Path(temp, "before.json"), "before", source_dirs)
+        after, last_issues, after_exit, after_config, after_digest = native_run(
+            roots[1], roots[0], native_interpreter(roots[1], args.after_python),
+            args.targets, Path(temp, "after.json"), "after", source_dirs)
     issues = first_issues + last_issues
     if sources != test_sources(roots, files + args.test_source):
         issues.append("A declared test source changed during execution. Review the changes and rerun.")

@@ -149,6 +149,144 @@ def test_console_retry():
             self.assertEqual(output, count)
         self.assertIn("(recovered)", result)
 
+    def test_optimized_assertions_hold_while_rewritten_test_results_are_preserved(self):
+        caller = {"PYTHONOPTIMIZE": "1", "PYTEST_ADDOPTS": "--assert=plain"}
+        result = self.review(100, TARGET, caller_env=caller)
+        self.assertIn("1/1 before and 1/1 after", result)
+        self.assertIn("unset pythonoptimize", result)
+        caller["PYTEST_ADDOPTS"] = "-p no:assertion"
+        self.assertIn("unset pythonoptimize", self.review(100, TARGET, caller_env=caller))
+        caller["PYTEST_ADDOPTS"] = "--assert=rewrite"
+        result = self.review(100, TARGET, caller_env=caller)
+        self.assertIn("0/1 before and 1/1 after", result)
+        self.assertIn("failed -> passed", result)
+        result = self.review(0, TARGET, caller_env={"PYTEST_ADDOPTS": "--assert=plain"})
+        self.assertIn("failed -> passed (recovered)", result)
+
+    def test_optimized_unrewritten_helper_cannot_supply_a_fake_repair(self):
+        for root, fixed in [(self.before, False), (self.after, True)]:
+            (root / "worker.py").write_text("def require(value): assert value\ncurrent = " + str(fixed))
+            (root / "test_worker.py").write_text("from worker import require, current\ndef test_retry(): require(current)\n")
+        result = self.review(100, TARGET, caller_env={"PYTHONOPTIMIZE": "1"})
+        self.assertIn("1/1 before and 1/1 after", result)
+        self.assertIn("unset pythonoptimize", result)
+        self.assertIn("failed -> passed (recovered)", self.review(0, TARGET))
+
+    def test_custom_service_import_from_the_other_checkout_holds(self):
+        relative = Path("services", "payments", "src")
+        for root, fixed in [(self.before, False), (self.after, True)]:
+            package = root / relative / "ledger"
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text("current = " + str(fixed))
+            (root / "pytest.ini").write_text(f"[pytest]\npythonpath = {self.after / relative}\n")
+            (root / "test_worker.py").write_text("from ledger import current\ndef test_retry(): assert current\n")
+        result = self.review(100, TARGET)
+        self.assertIn("1/1 before and 1/1 after", result)
+        self.assertIn("before: a project module loaded from outside", result)
+
+    def test_declared_service_helper_detects_a_third_checkout_install(self):
+        relative = Path("services", "payments", "src")
+        third = self.root / "another-source-tree"
+        for root, fixed in [(self.before, False), (self.after, True), (third, True)]:
+            package = root / relative / "ledger"
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text("current = " + str(fixed))
+            (package / "rules.py").write_text("def require(value): assert value\n")
+            (root / "test_worker.py").write_text(
+                "from ledger import current\nfrom ledger.rules import require\ndef test_retry(): require(current)\n")
+        result = self.review(100, "--test-source", relative / "ledger/rules.py", TARGET,
+                             caller_env={"PYTHONPATH": str(third / relative)})
+        self.assertIn("1/1 before and 1/1 after", result)
+        self.assertIn("before: a project module loaded from outside", result)
+        self.assertIn("after: a project module loaded from outside", result)
+
+    def src_project(self, root, fixed):
+        package = root / "src" / "parcel"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("")
+        (package / "rules.py").write_text("deliveries = " + ("1" if fixed else "2"))
+        (root / "test_parcel.py").write_text(
+            "from parcel.rules import deliveries\n"
+            "def test_once(): assert deliveries == 1\n"
+        )
+
+    def test_shared_pythonpath_runs_each_source_and_keeps_unrelated_dependencies(self):
+        shared = self.root / "dependencies"
+        shared.mkdir()
+        (shared / "customer_clock.py").write_text("DEADLINE = 1\n")
+        for root, fixed in [(self.before, False), (self.after, True)]:
+            self.src_project(root, fixed)
+            (root / "test_parcel.py").write_text(
+                "from parcel.rules import deliveries\nfrom customer_clock import DEADLINE\n"
+                "def test_once(): assert deliveries == DEADLINE\n"
+            )
+        for supplied in [self.before, self.after]:
+            caller = {"PYTHONPATH": os.pathsep.join([str(supplied / "src"), str(shared)])}
+            result = self.review(0, "test_parcel.py", caller_env=caller)
+            self.assertIn("failed -> passed (recovered)", result)
+            self.before, self.after = self.after, self.before
+            try:
+                result = self.review(100, "test_parcel.py", caller_env=caller)
+                self.assertIn("passed -> failed", result)
+            finally:
+                self.before, self.after = self.after, self.before
+
+    def test_shared_editable_path_does_not_supply_the_other_revision(self):
+        for root, fixed in [(self.before, False), (self.after, True)]:
+            self.src_project(root, fixed)
+        shared = self.root / "shared-venv"
+        venv.EnvBuilder(with_pip=False, system_site_packages=True).create(shared)
+        python = shared / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        packages = Path(subprocess.check_output(
+            [python, "-c", "import sysconfig; print(sysconfig.get_path('purelib'))"], text=True
+        ).strip())
+        # A path-based editable install adds the installed checkout to site-packages.
+        (packages / "parcel.pth").write_text(str(self.after / "src") + "\n")
+        if sys.prefix != sys.base_prefix:
+            (packages / "shared-test-dependencies.pth").write_text(sysconfig.get_path("purelib") + "\n")
+        unbound = subprocess.check_output([python, "-c", "from parcel.rules import deliveries; print(deliveries)"],
+                                         cwd=self.before, text=True).strip()
+        self.assertEqual(unbound, "1")
+        result = self.review(0, "--before-python", python, "--after-python", python, "test_parcel.py")
+        self.assertIn("failed -> passed (recovered)", result)
+
+    def test_mixed_submodule_during_a_case_holds_an_apparent_pass(self):
+        shared = self.root / "PRIVATE_other_install"
+        shared.mkdir()
+        (shared / "rules.py").write_text("deliveries = 1\n")
+        for root, fixed in [(self.before, False), (self.after, True)]:
+            self.src_project(root, fixed)
+            (root / "test_parcel.py").write_text(
+                "import os, sys, pytest, parcel\n"
+                "@pytest.fixture\n"
+                "def plugin_origin(monkeypatch):\n"
+                "    monkeypatch.setattr(parcel, '__path__', [os.environ['EXTRA_PLUGIN'], *parcel.__path__])\n"
+                "    yield\n"
+                "    sys.modules.pop('parcel.rules', None)\n"
+                "def test_once(plugin_origin):\n"
+                "    from parcel.rules import deliveries\n"
+                "    assert deliveries == 1\n"
+            )
+        result = self.review(100, "test_parcel.py", caller_env={"EXTRA_PLUGIN": str(shared)})
+        self.assertIn("project module loaded from outside", result)
+        self.assertIn("pip install -e .", result)
+        self.assertNotIn("(recovered)", result)
+
+    def test_shared_namespace_dependency_remains_available(self):
+        shared = self.root / "dependencies"
+        (shared / "acme").mkdir(parents=True)
+        (shared / "acme" / "clock.py").write_text("now = 1\n")
+        for root, fixed in [(self.before, False), (self.after, True)]:
+            folder = root / "src" / "acme"
+            folder.mkdir(parents=True)
+            (folder / "parcel.py").write_text("due = " + ("1" if fixed else "2"))
+            (root / "test_parcel.py").write_text(
+                "from acme.clock import now\nfrom acme.parcel import due\n"
+                "def test_due(): assert due == now\n"
+            )
+        result = self.review(0, "test_parcel.py", caller_env={"PYTHONPATH": str(shared)})
+        self.assertIn("failed -> passed (recovered)", result)
+
     def test_option_looking_filename_is_rejected_as_a_positional_target(self):
         filename = "--junitxml=unexpected.py"
         for root in (self.before, self.after):
