@@ -103,7 +103,9 @@ def resolved_result(value, callback):
     return value
 
 
-def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=None, variant="candidate", score_rows=None):
+def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=None, variant=None, score_rows=None):
+    explicit_variant = variant is not None
+    variant = variant or "candidate"
     items = definition["cases"]
     if not items or not definition["checks"]:
         raise ValueError("Provide at least one case and one named check.")
@@ -127,11 +129,14 @@ def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=N
     if inspect_values:
         if case_id is None or len(items) != 1:
             raise ValueError("--inspect-values requires one --case CASE_ID.")
+        if not callable(definition.get(variant)):
+            raise ValueError(f"The workflow must define a callable {variant}.")
         with tempfile.NamedTemporaryFile(prefix="tokensand-case-", suffix=".jsonl", delete=False) as handle:
             values_path = Path(handle.name)
         preview = ValuePreview()
         preview.maxlevel = 3
         preview.maxstring = 256
+        print(f"Replay variant: {variant} (fresh local run)", flush=True)
         print("Private case values: " + str(values_path), flush=True)
 
     suite = unittest.TestSuite()
@@ -153,6 +158,8 @@ def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=N
                 output = resolved_result(definition[variant](copy.deepcopy(current["input"])), variant)
                 if values_path is not None:
                     row = {"trial": repetition, "actual": preview.repr(output)[:2048]}
+                    if explicit_variant:
+                        row["variant"] = variant
                     if isinstance(current["input"], dict) and "expected" in current["input"]:
                         row["expected"] = preview.repr(current["input"]["expected"])[:2048]
                     with values_path.open("a", encoding="utf-8") as handle:
@@ -344,15 +351,24 @@ def main(argv):
     parser.add_argument("--offline-workflow", type=Path, action="append", help="Trusted local Python file exporting a workflow dictionary.")
     parser.add_argument("--case", action="append", help="Exact case ID to run at least three times. Repeat --case to select more cases.")
     parser.add_argument("--inspect-values", action="store_true", help="Save local expected and actual value previews for one case.")
+    parser.add_argument("--variant", choices=("baseline", "candidate"), action="append",
+                        help="Choose the arm for a fresh --inspect-values replay of one case (default: candidate).")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show the full unittest report for each trial.")
     parser.add_argument("--compare-baseline", action="store_true",
                         help="Score baseline and candidate separately on matched offline fixtures and print changed checks.")
     args = parser.parse_args(argv)
+    if args.variant:
+        if args.compare_baseline:
+            parser.error("--compare-baseline scores both arms. For private values, use --case CASE_ID --inspect-values --variant baseline or candidate separately.")
+        if len(args.variant) != 1:
+            parser.error("Choose one --variant baseline or candidate.")
+        if not args.inspect_values:
+            parser.error("--variant selects one arm for --inspect-values with one --case CASE_ID.")
     if args.compare_baseline:
         if len(args.offline_workflow or []) != 1:
             parser.error("--compare-baseline requires --offline-workflow PATH to your project adapter.")
         if args.inspect_values or args.verbose:
-            parser.error("For values or detailed unittest output, run the ordinary candidate check separately.")
+            parser.error("--compare-baseline reports changed checks. To inspect one arm, omit --compare-baseline and use --case CASE_ID --inspect-values --variant baseline or candidate. Use --verbose separately for detailed candidate output.")
         return compare_baseline(args.offline_workflow[0], args.case or [])
     if args.inspect_values and len(args.case or []) != 1:
         parser.error("--inspect-values requires one --case CASE_ID.")
@@ -364,7 +380,8 @@ def main(argv):
         definition = workflow
     try:
         score_issues = []
-        suite = case_suite(definition, args.case, args.inspect_values, score_issues=score_issues)
+        suite = case_suite(definition, args.case, args.inspect_values, score_issues=score_issues,
+                           variant=args.variant[0] if args.variant else None)
     except ValueError as error:
         parser.error(str(error))
     group_trials = not args.verbose and not args.case and definition.get("repetitions", 1) > 1
