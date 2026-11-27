@@ -131,7 +131,9 @@ python3 -m pip install https://github.com/giolux1235/tokensand-agent-pack/releas
 python3 -m tokensand_check --offline-workflow ./my_workflow.py
 ```
 
-For an async agent, return its completed output from the synchronous adapter. For example, after importing `asyncio`, use `return asyncio.run(agent.ainvoke(item))` inside `candidate(item)`. Collect streamed replies before scoring them.
+If you edited `test_tokensand_first.py`, run `python3 -m tokensand_check --offline-workflow ./test_tokensand_first.py` after upgrading the wheel. This checks your saved workflow with the installed runner. Running the file directly or omitting the arguments uses the runner embedded in your copy.
+
+For an async agent, import `asyncio` and return `asyncio.run(agent.ainvoke(item))` from `candidate(item, ctx=None)`. The optional second argument accepts the context passed by the private SDK’s workflow worker. Collect streamed replies before scoring them.
 
 Try the [SQLite sync example](examples/incremental-sync.py) as `my_workflow.py`. The initial read passes. Resuming a page drops a record when two timestamps match. Rerun with `FIX_CURSOR=1` to verify the repair. The summary shows how many trials failed and how many lacked a required score. An affected trial can appear in both counts.
 
