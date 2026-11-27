@@ -49,7 +49,7 @@ class ValuePreview(reprlib.Repr):
         return f"<{type(value).__name__}>"
 
 
-def case_suite(definition, case_id=None, inspect_values=False):
+def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=None):
     items = definition["cases"]
     if not items or not definition["checks"]:
         raise ValueError("Provide at least one case and one named check.")
@@ -112,6 +112,8 @@ def case_suite(definition, case_id=None, inspect_values=False):
                         if inspect.iscoroutine(value):
                             value.close()
                         unscored.append(label)
+                if score_issues is not None and (failed or unscored):
+                    score_issues.append((failed, unscored))
                 reasons = []
                 if failed:
                     reasons.append("Failed checks: " + ", ".join(failed))
@@ -147,8 +149,16 @@ if __name__ == "__main__":
         sys.path.insert(0, str(path.parent))
         workflow = runpy.run_path(str(path))["workflow"]
     try:
-        suite = case_suite(workflow, args.case, args.inspect_values)
+        score_issues = []
+        suite = case_suite(workflow, args.case, args.inspect_values, score_issues=score_issues)
     except ValueError as error:
         parser.error(str(error))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
+    if any(unscored for _, unscored in score_issues):
+        print(f"Trials with failed or unscored checks: {len(score_issues)} of {result.testsRun}", file=sys.stderr)
+        for description, groups in zip(("failed", "unscored"), zip(*score_issues)):
+            count = sum(bool(labels) for labels in groups)
+            names = ", ".join(dict.fromkeys(label for labels in groups for label in labels))
+            detail = f" ({names})" if names else ""
+            print(f"Trials with {description} checks: {count}{detail}", file=sys.stderr)
     sys.exit(0 if result.wasSuccessful() else 1)

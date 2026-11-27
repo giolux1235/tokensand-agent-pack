@@ -21,7 +21,7 @@ function packagedCli(version) {
 }
 
 const sourceCli = fileURLToPath(new URL("./cli.mjs", import.meta.url));
-const cli = existsSync(sourceCli) ? sourceCli : packagedCli("0.1.18");
+const cli = existsSync(sourceCli) ? sourceCli : packagedCli("0.1.19");
 function fixture(t, name = "observe.workflow.mjs", ids = ["blocks", "also-blocks"]) {
   const cwd = mkdtempSync(join(tmpdir(), "tokensand-focused-"));
   t.after(() => rmSync(cwd, {recursive:true,force:true}));

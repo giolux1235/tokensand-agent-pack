@@ -197,13 +197,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
           if (item.input != null && Object.hasOwn(item.input, "expected")) row.expected = preview(item.input.expected);
           appendFileSync(valuesFile, JSON.stringify(row) + "\n");
         }
-        let scores;
+        let scores, evaluatorThrew = false;
         try {
           scores = await selected.evaluate({ input: structuredClone(item.input), output, variant: "candidate" });
         } catch {
-          // No scorer map was returned. Each declared check remains unscored.
+          evaluatorThrew = true;
         }
-        const failed = [], unscored = [];
+        const failed = [], unscored = [], scorersThatThrew = [];
         for (const check of selected.checks) {
           t.signal.throwIfAborted();
           const label = check.label || check.id;
@@ -214,6 +214,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
             else if (value !== true) unscored.push(label);
           } catch {
             unscored.push(label);
+            scorersThatThrew.push(label);
           }
         }
         // A synchronous callback can finish before Node gets a turn to fire its timer.
@@ -224,8 +225,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
         if (unscored.length) {
           const reasons = failed.length ? [`Failed checks: ${failed.join(", ")}`] : [];
           reasons.push(`Unscored checks: ${unscored.join(", ")}`);
+          if (evaluatorThrew) reasons.push("The evaluator threw before returning scores");
+          if (scorersThatThrew.length) reasons.push(`Scorers that threw: ${scorersThatThrew.join(", ")}`);
           const error = new Error(reasons.join(". "));
-          error.code = "TOKENSAND_UNSCORED";
+          error.code = failed.length ? "TOKENSAND_FAILED_AND_UNSCORED" : "TOKENSAND_UNSCORED";
+          error.scorerError = evaluatorThrew || scorersThatThrew.length > 0;
           throw error;
         }
         assert.equal(failed.length, 0, failed.join(", "));
