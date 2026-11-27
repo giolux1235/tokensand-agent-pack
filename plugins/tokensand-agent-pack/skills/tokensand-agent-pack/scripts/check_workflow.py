@@ -2,6 +2,7 @@
 import argparse
 import copy
 from collections.abc import AsyncIterable
+import hashlib
 import inspect
 import json
 import reprlib
@@ -101,7 +102,7 @@ def resolved_result(value, callback):
     return value
 
 
-def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=None):
+def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=None, variant="candidate", score_rows=None):
     items = definition["cases"]
     if not items or not definition["checks"]:
         raise ValueError("Provide at least one case and one named check.")
@@ -134,18 +135,28 @@ def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=N
 
     suite = unittest.TestSuite()
     for case_index, case in enumerate(items):
+        if score_rows is not None:
+            encoded = json.dumps(case["input"], sort_keys=True, separators=(",", ":"), allow_nan=False)
+            if json.loads(encoded) != case["input"]:
+                raise ValueError("Paired checks require JSON fixture inputs.")
+            fingerprint = hashlib.sha256(encoded.encode()).hexdigest()
         for trial in range(1, trials + 1):
             trial_issues = []
-            def check(current=case, repetition=trial, issues=trial_issues):
+            outcomes = None
+            if score_rows is not None:
+                outcomes = [None] * len(definition["checks"])
+                score_rows.append([case["id"], trial, fingerprint, outcomes])
+
+            def check(current=case, repetition=trial, issues=trial_issues, recorded=outcomes):
                 issues.clear()
-                output = resolved_result(definition["candidate"](copy.deepcopy(current["input"])), "candidate")
+                output = resolved_result(definition[variant](copy.deepcopy(current["input"])), variant)
                 if values_path is not None:
                     row = {"trial": repetition, "actual": preview.repr(output)[:2048]}
                     if isinstance(current["input"], dict) and "expected" in current["input"]:
                         row["expected"] = preview.repr(current["input"]["expected"])[:2048]
                     with values_path.open("a", encoding="utf-8") as handle:
                         handle.write(json.dumps(row) + "\n")
-                scores = resolved_result(definition["evaluate"](copy.deepcopy(current["input"]), output, "candidate"), "evaluate")
+                scores = resolved_result(definition["evaluate"](copy.deepcopy(current["input"]), output, variant), "evaluate")
                 observed = []
                 timed_out = False
                 for check_index, rule in enumerate(definition["checks"]):
@@ -157,6 +168,8 @@ def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=N
                             value = score() if callable(score) else score
                         except Exception as error:
                             timed_out = isinstance(error, (TimeoutError, subprocess.TimeoutExpired))
+                    if recorded is not None and type(value) is bool:
+                        recorded[check_index] = value
                     if value is True:
                         continue
                     if inspect.iscoroutine(value):
@@ -190,31 +203,118 @@ def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=N
     return suite
 
 
+def load_workflow(path):
+    path = Path(path).resolve()
+    sys.path.insert(0, str(path.parent))
+    return runpy.run_path(str(path))["workflow"]
+
+
+def write_variant_scores(variant, destination, workflow_path, *selected):
+    original = load_workflow(workflow_path)
+    # Capture the declared test matrix before application callbacks can mutate it.
+    definition = dict(original, cases=copy.deepcopy(list(original["cases"])),
+                      checks=copy.deepcopy(list(original["checks"])))
+    if not callable(definition.get("evaluate")):
+        raise ValueError("The workflow must define a callable evaluator.")
+    if not callable(definition.get(variant)):
+        raise ValueError(f"The workflow must define a callable {variant}.")
+    for field in ("cases", "checks"):
+        ids = [entry["id"] for entry in definition[field]]
+        if not all(isinstance(key, str) and key for key in ids) or len(ids) != len(set(ids)):
+            raise ValueError(f"Each entry in {field} needs a unique string id.")
+    rows = []
+    suite = case_suite(definition, selected or None, variant=variant, score_rows=rows)
+    result = suite.run(unittest.TestResult())
+    if not rows or result.testsRun != len(rows):
+        raise ValueError("No complete test matrix was executed.")
+    with Path(destination).open("x") as receipt:
+        json.dump({"checks": [c["id"] for c in definition["checks"]], "rows": rows}, receipt)
+
+
+def compare_baseline(workflow_path, selected):
+    # Separate interpreters preserve within-variant state across repetitions without
+    # letting one variant warm the other's cache or advance its application state.
+    if not workflow_path.is_file():
+        print(f"Workflow adapter not found: {workflow_path}", file=sys.stderr)
+        return 2
+    initial_hash = hashlib.sha256(workflow_path.read_bytes()).digest()
+    records = []
+    with tempfile.TemporaryDirectory() as directory:
+        for variant in ("baseline", "candidate"):
+            path = Path(directory) / variant
+            run = subprocess.run(
+                [sys.executable, __file__, "--_variant-scores", variant, str(path), str(workflow_path), *selected],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            if run.returncode or not path.is_file():
+                print(f"Could not score the {variant}. Check the adapter defines both workflows, an evaluator, unique case/check IDs "
+                      "and JSON inputs. Check any --case ID or run the ordinary check for setup details.", file=sys.stderr)
+                return 2
+            if not workflow_path.is_file() or hashlib.sha256(workflow_path.read_bytes()).digest() != initial_hash:
+                print("The workflow adapter changed during the check. Save it and rerun.", file=sys.stderr)
+                return 2
+            records.append(json.loads(path.read_text()))
+
+    before, after = records
+    if (not before["checks"] or not before["rows"] or before["checks"] != after["checks"]
+            or [r[:3] for r in before["rows"]] != [r[:3] for r in after["rows"]]):
+        print("Cases, inputs, repetitions or checks changed between variants. Freeze the fixtures and rerun.", file=sys.stderr)
+        return 2
+    labels = ("New failure", "Unscored", "Existing failure", "Recovered", "Passed both")
+    transitions = {(True, False): labels[0], (False, False): labels[2],
+                   (False, True): labels[3], (True, True): labels[4]}
+    grouped = {label: {} for label in labels}
+    for old, new in zip(before["rows"], after["rows"]):
+        case_id, trial, _, values = new
+        for check_id, earlier, current in zip(after["checks"], old[3], values):
+            label = transitions.get((earlier, current), "Unscored")
+            grouped[label].setdefault((case_id, check_id), []).append(trial)
+    print("Baseline and candidate on the same cases and checks", file=sys.stderr)
+    for label, pairs in grouped.items():
+        if label == "New failure" and not pairs:
+            print("New failures: undetermined (unscored checks)" if grouped["Unscored"] else "New failures: 0", file=sys.stderr)
+        for (case_id, check_id), trials in pairs.items():
+            print(f"{label}: {json.dumps(case_id)} / {json.dumps(check_id)} · trials "
+                  + ", ".join(map(str, trials)), file=sys.stderr)
+    return int(bool(grouped["New failure"] or grouped["Existing failure"] or grouped["Unscored"]))
+
+
 def load_tests(loader, tests, pattern):
     return case_suite(workflow)
 
 
-if __name__ == "__main__":
+def main(argv):
+    if argv[:1] == ["--_variant-scores"]:
+        write_variant_scores(*argv[1:])
+        return 0
     parser = argparse.ArgumentParser(description="Run each offline case for its configured repetitions (default: once).")
     parser.add_argument("--offline-workflow", type=Path, action="append", help="Trusted local Python file exporting a workflow dictionary.")
     parser.add_argument("--case", action="append", help="Exact case ID to run at least three times. Repeat --case to select more cases.")
     parser.add_argument("--inspect-values", action="store_true", help="Save local expected and actual value previews for one case.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show the full unittest report for each trial.")
-    args = parser.parse_args()
+    parser.add_argument("--compare-baseline", action="store_true",
+                        help="Score baseline and candidate separately on matched offline fixtures and print changed checks.")
+    args = parser.parse_args(argv)
+    if args.compare_baseline:
+        if len(args.offline_workflow or []) != 1:
+            parser.error("--compare-baseline requires --offline-workflow PATH to your project adapter.")
+        if args.inspect_values or args.verbose:
+            parser.error("For values or detailed unittest output, run the ordinary candidate check separately.")
+        return compare_baseline(args.offline_workflow[0], args.case or [])
     if args.inspect_values and len(args.case or []) != 1:
         parser.error("--inspect-values requires one --case CASE_ID.")
     if args.offline_workflow:
         if len(args.offline_workflow) != 1:
             parser.error("Supply one --offline-workflow path.")
-        path = args.offline_workflow[0].resolve()
-        sys.path.insert(0, str(path.parent))
-        workflow = runpy.run_path(str(path))["workflow"]
+        definition = load_workflow(args.offline_workflow[0])
+    else:
+        definition = workflow
     try:
         score_issues = []
-        suite = case_suite(workflow, args.case, args.inspect_values, score_issues=score_issues)
+        suite = case_suite(definition, args.case, args.inspect_values, score_issues=score_issues)
     except ValueError as error:
         parser.error(str(error))
-    group_trials = not args.verbose and not args.case and workflow.get("repetitions", 1) > 1
+    group_trials = not args.verbose and not args.case and definition.get("repetitions", 1) > 1
     runner = unittest.TextTestRunner(verbosity=0, resultclass=GroupedTrialResult) if group_trials else unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
     if any(unscored for _, unscored in score_issues):
@@ -224,4 +324,8 @@ if __name__ == "__main__":
             names = ", ".join(dict.fromkeys(label for labels in groups for label in labels))
             detail = f" ({names})" if names else ""
             print(f"Trials with {description} checks: {count}{detail}", file=sys.stderr)
-    sys.exit(0 if result.wasSuccessful() else 1)
+    return 0 if result.wasSuccessful() else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

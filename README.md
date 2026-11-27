@@ -99,7 +99,7 @@ Save the checker for your language in your repository. Run it with your own trus
 | Download | Command |
 | --- | --- |
 | [Node.js checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/workflow-check-0.1.19/tokensand-first.test.mjs) | `node tokensand-first.test.mjs --offline-workflow ./observe.workflow.mjs` |
-| [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.10/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
+| [Python checker](https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.11/test_tokensand_first.py) | `python3 test_tokensand_first.py --offline-workflow ./my_workflow.py` |
 
 Set `repetitions` to an integer from 1 to 10 to run every case that many times. Omit it to run each case once. Append `--case ID_A --case ID_B` to repeat only those cases, at least three times each. An ordinary local check exits `0` when its checks pass and `1` on a failed or unscored check. An invalid case selection or repetition count exits `2`. For expected and actual values, select one case with `--case CASE_ID --inspect-values` and open the private file it prints. Delete it after debugging.
 
@@ -124,9 +124,17 @@ For Claude Code, use `.claude/skills` in the same command. You can also [downloa
 In your project’s virtual environment, install the checker and run your trusted local workflow:
 
 ```sh
-python3 -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.10/tokensand_workflow_check-0.1.10-py3-none-any.whl
+python3 -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/python-check-0.1.11/tokensand_workflow_check-0.1.11-py3-none-any.whl
 python3 -m tokensand_check --offline-workflow ./my_workflow.py
 ```
+
+To see which checks a change broke or fixed, run both trusted offline callbacks on the same JSON fixtures:
+
+```sh
+python3 -m tokensand_check --offline-workflow ./my_workflow.py --compare-baseline
+```
+
+The report groups new failures, existing failures, recoveries and unscored checks by case and trial. Each workflow runs in a fresh process. Exit 0 means the candidate passed every selected check and every baseline check produced a score. Exit 1 means a candidate failure or incomplete scores. Exit 2 means setup or fixture matching failed. Append `--case CASE_ID` to focus on one case.
 
 If you edited `test_tokensand_first.py`, run `python3 -m tokensand_check --offline-workflow ./test_tokensand_first.py` after upgrading the wheel. This checks your saved workflow with the installed runner. Running the file directly or omitting the arguments uses the runner embedded in your copy.
 
