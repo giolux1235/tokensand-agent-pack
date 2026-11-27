@@ -15,9 +15,9 @@ Work in a fresh checkout, separate from the builder’s app. Inspect the command
 
 ## Check a workflow change
 
-Start with the affected service’s existing offline regression test. Use its interpreter and narrow pytest target (`python -m pytest -q TEST_TARGET`) or unittest test ID. Report the failing test names, skips, setup errors and empty collection separately. This is a local app test. When reviewing a repair across supplied revisions, rerun the same strengthened tests and fixtures on both implementations.
+Start with the affected service’s existing offline regression test. Inspect its fixtures and plugins for network use. Obtain approval before a paid run. Use its interpreter and narrow pytest target (`python -m pytest -q TEST_TARGET`) or unittest test ID. Report the failing test names, skips, setup errors and empty collection separately. This is a local app test. When reviewing a repair across supplied revisions, rerun the same strengthened tests and fixtures on both implementations.
 
-For pytest JUnit reports: `python3 SKILL_DIR/scripts/review_pytest.py BEFORE.xml AFTER.xml --before-root EARLIER --after-root LATER --test-source TEST_FILE`. List each test file. Ancestor conftest.py and standard configs are checked automatically. Add imported helpers, custom configs and data via `--test-source`. Keep reports private; 100 holds, 1 invalid. Check native pytest for unexpected passes.
+For a Python repair, run `python3 SKILL_DIR/scripts/review_pytest.py --run --before-root EARLIER --after-root LATER FILE[::NODE]` on trusted offline cases. It runs both checkouts with their own .venv or the calling Python. The active pytest config is checked. Add imported fixtures or data via `--test-source`. Name failed cases, unexpected passes and test bodies skipped in setup. Exit 100 holds the decision and 1 means setup or evidence was unusable. Existing JUnit reports support the same script with `BEFORE.xml AFTER.xml --before-root EARLIER --after-root LATER --test-source FILE`. XML alone can hide non-strict unexpected passes. Keep evidence local.
 
 Inspect trusted adapters for network calls before running them.
 
