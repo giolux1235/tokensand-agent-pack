@@ -158,16 +158,14 @@ def case_suite(definition, case_id=None, inspect_values=False, *, score_issues=N
                         handle.write(json.dumps(row) + "\n")
                 scores = resolved_result(definition["evaluate"](copy.deepcopy(current["input"]), output, variant), "evaluate")
                 observed = []
-                timed_out = False
                 for check_index, rule in enumerate(definition["checks"]):
                     label = str(rule.get("label") or rule["id"])
                     score = scores.get(rule["id"])
-                    value = None
-                    if not timed_out:
-                        try:
-                            value = score() if callable(score) else score
-                        except Exception as error:
-                            timed_out = isinstance(error, (TimeoutError, subprocess.TimeoutExpired))
+                    try:
+                        value = score() if callable(score) else score
+                    except Exception:
+                        # This synchronous scorer returned control. Other named checks are independent.
+                        value = None
                     if recorded is not None and type(value) is bool:
                         recorded[check_index] = value
                     if value is True:
@@ -264,18 +262,27 @@ def compare_baseline(workflow_path, selected):
     transitions = {(True, False): labels[0], (False, False): labels[2],
                    (False, True): labels[3], (True, True): labels[4]}
     grouped = {label: {} for label in labels}
+    partial_pairs = {}
     for old, new in zip(before["rows"], after["rows"]):
         case_id, trial, _, values = new
         for check_id, earlier, current in zip(after["checks"], old[3], values):
             label = transitions.get((earlier, current), "Unscored")
-            grouped[label].setdefault((case_id, check_id), []).append(trial)
+            key = (case_id, check_id)
+            grouped[label].setdefault(key, []).append(trial)
+            if label == "Unscored":
+                partial_pairs.setdefault(key, {}).setdefault((earlier, current), []).append(trial)
     print("Baseline and candidate on the same cases and checks", file=sys.stderr)
+    score_text = {True: "passed", False: "failed", None: "unscored"}
     for label, pairs in grouped.items():
         if label == "New failure" and not pairs:
             print("New failures: undetermined (unscored checks)" if grouped["Unscored"] else "New failures: 0", file=sys.stderr)
         for (case_id, check_id), trials in pairs.items():
             print(f"{label}: {json.dumps(case_id)} / {json.dumps(check_id)} · trials "
                   + ", ".join(map(str, trials)), file=sys.stderr)
+            if label == "Unscored":
+                for (earlier, current), partial_trials in partial_pairs[(case_id, check_id)].items():
+                    print(f"  Baseline {score_text[earlier]}, candidate {score_text[current]} · trials "
+                          + ", ".join(map(str, partial_trials)), file=sys.stderr)
     return int(bool(grouped["New failure"] or grouped["Existing failure"] or grouped["Unscored"]))
 
 
