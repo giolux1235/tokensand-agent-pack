@@ -231,3 +231,62 @@ test("counts timed failed calls in recovered workflows and recognizes a faster r
   assert.equal(out.trials[0].candidate.failedCalls, 0);
   assert.equal(out.trials[1].deltaMs, -5);
 });
+
+function allToolTimes(f, args = []) {
+  return spawnSync(process.execPath, [command, f.dir, "--result", f.id, "--tool-time", ...args], { encoding: "utf8" });
+}
+
+test("discovers changes across renamed and overlapping tools using only the two metadata files", t => {
+  const f = fixture(t), plan = f.read("plan.json"), result = f.read("result.json");
+  plan.plan.cases.push({ ...plan.plan.cases[0], id: "extra-hop" });
+  result.plan = plan.plan;
+  for (const row of result.runs) {
+    row.workflowMs = 48;
+    const original = row.toolSpans[0];
+    row.toolSpans = row.variant === "baseline"
+      ? [{ ...original, name: "get-a", startMs: 0, durationMs: 20 }, { ...original, id: randomUUID(), name: "get-b", startMs: 4, durationMs: 10, status: "error" }]
+      : [{ ...original, name: "batch", startMs: 0, durationMs: 5 }];
+  }
+  const extra = result.runs.map(row => ({
+    ...row, caseId: "extra-hop", sessionId: randomUUID(),
+    toolSpans: [{ ...row.toolSpans[0], id: randomUUID(), name: "lookup",
+      durationMs: row.variant === "baseline" ? 5 : row.repetition === 0 ? 5 : 29 }]
+  }));
+  result.runs.push(...extra);
+  f.save("plan.json", plan); f.save("result.json", result);
+  for (let n = 1; n <= 6; n++) rmSync(join(f.dir, "run-00" + n + ".json"));
+  const proc = allToolTimes(f);
+  assert.equal(proc.status, 0, proc.stderr); assert.doesNotMatch(proc.stdout, new RegExp(canary));
+  const [slow, fast] = JSON.parse(proc.stdout).cases;
+  assert.deepEqual([slow.caseId, slow.medianPairedDeltaMs, slow.slowerTrialIds], ["extra-hop", 24, [2, 3]]);
+  assert.deepEqual([fast.caseId, fast.medianPairedDeltaMs, fast.fasterTrialIds], ["repeat-item", -15, [1, 2, 3]]);
+  assert.deepEqual(fast.recordedCalls, { baseline: { "get-a": 3, "get-b": 3 }, candidate: { batch: 3 } });
+  assert.deepEqual(fast.failedCalls, { baseline: 3, candidate: 0 });
+});
+
+test("incomplete measurements cannot silently appear as faster or slower", t => {
+  const f = fixture(t), result = f.read("result.json");
+  result.state = "interrupted";
+  result.runs = result.runs.filter(r => !(r.variant === "candidate" && r.repetition === 0));
+  result.runs.find(r => r.variant === "baseline" && r.repetition === 1).toolSpans = [];
+  result.runs.find(r => r.variant === "candidate" && r.repetition === 2).telemetryComplete = false;
+  f.save("result.json", result);
+  const proc = allToolTimes(f); assert.equal(proc.status, 2, proc.stderr);
+  const [row] = JSON.parse(proc.stdout).cases;
+  assert.equal(row.medianPairedDeltaMs, null); assert.equal(row.comparablePairs, 0);
+  assert.deepEqual(row.unavailablePairs.map(x => x.baseline ?? x.candidate), ["missing trial", "tool not recorded", "incomplete telemetry"]);
+  for (const bad of [["--case","repeat-item"],["--tool","lookup"],["--field","stock"],["--trial","1"],["--min-delta-ms","-1"]]) {
+    const invalid = allToolTimes(f, bad); assert.equal(invalid.status, 2); assert.equal(invalid.stdout, "");
+  }
+});
+
+test("retains available timings while signaling an interrupted experiment", t => {
+  const f = fixture(t), result = f.read("result.json");
+  result.state = "interrupted";
+  f.save("result.json", result);
+  const proc = allToolTimes(f);
+  assert.equal(proc.status, 2);
+  const report = JSON.parse(proc.stdout);
+  assert.equal(report.state, "interrupted");
+  assert.equal(report.cases[0].comparablePairs, 3);
+});
