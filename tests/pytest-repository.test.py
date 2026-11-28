@@ -9,11 +9,12 @@ import subprocess
 import sys
 import tempfile
 from threading import Thread
+import time
 import unittest
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-WHEEL = ROOT / "packages/tokensand_pytest_checks-0.1.2-py3-none-any.whl"
+WHEEL = ROOT / "packages/tokensand_pytest_checks-0.1.3-py3-none-any.whl"
 CAPTURE = ROOT / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/scripts/capture_pytest.py"
 PROJECT, EPOCH = str(uuid.uuid4()), str(uuid.uuid4())
 ENDPOINT = "/api/observability/v1/repository-checks"
@@ -108,6 +109,99 @@ class InstalledConsumer(unittest.TestCase):
 
     def run_tests(self, *args, **kwargs):
         return self.call("-m", "pytest", "-q", *args, **kwargs)
+
+    def test_results_reads_only_the_connected_hosted_app_without_credentials(self):
+        env = {k:v for k,v in self.env.items() if not k.startswith("TOKENS_")}
+        args = ("-m", "tokensand_pytest", "results")
+        unavailable = "No hosted Tokens& app is connected in this checkout.\n"
+        self.assertEqual(self.call(*args, env=env, code=1), unavailable)
+        self.assertFalse(self.db.exists())
+        self.connect("--queue-offline")
+        self.assertEqual(self.call(*args, env=env, code=1), unavailable)
+        hosted = "https://tokensand.com/api/observability/v1/repository-checks"
+        expected = f"https://tokensand.com/dashboard/agents?mode=developer&setup=repo&observeProjectId={PROJECT}#repository-checks"
+        for endpoint, project, ok in [(hosted, PROJECT, True), (hosted + "?secret", PROJECT, False),
+                                      (hosted, PROJECT + "&x=1", False), (hosted, str(uuid.UUID(int=0)), False)]:
+            with sqlite3.connect(self.db) as db:
+                db.execute("UPDATE connection SET endpoint=?, project=?", (endpoint,project))
+            before = self.db.read_bytes()
+            self.assertEqual(self.call(*args, env=env, code=int(not ok)), expected+"\n" if ok else unavailable)
+            self.assertEqual(self.db.read_bytes(), before)
+        self.assertEqual(self.server.handshakes, 1)
+        self.assertEqual(self.server.attempts, [])
+
+    def test_terminal_links_only_acknowledged_hosted_results(self):
+        # Redirect just the HTTP transport to the fixture. The wheel still validates and freezes the hosted binding.
+        env = {**self.env, "TOKENS_OBSERVE_INGEST_URL":"https://tokensand.com/api/observability/v1/events"}
+        local_origin = f"http://127.0.0.1:{self.server.server_port}"
+        runner = """
+import sys
+from tokensand_pytest import reporter, __main__
+transport = reporter._call
+def loopback(url, *args):
+    assert url.startswith('https://tokensand.com/api/observability/')
+    return transport(LOCAL + url[len('https://tokensand.com'):], *args)
+reporter._call = loopback
+sys.stdout.isatty = lambda: sys.argv[1] == 'tty'
+if sys.argv[2] == 'pytest':
+    import pytest
+    sys.exit(pytest.main(['-q', '-s', '--color=no', *sys.argv[3:]]))
+sys.exit(__main__.main(sys.argv[2:]))
+""".replace("LOCAL", repr(local_origin))
+        def run(*args, tty=True, code=0, scope=env):
+            return self.call("-c", runner, "tty" if tty else "pipe", *args, code=code, env=scope)
+        run("connect", PROJECT, self.target, "--queue-offline")
+        link = f"Private checks: https://tokensand.com/dashboard/agents?mode=developer&setup=repo&observeProjectId={PROJECT}#repository-checks"
+        self.assertIn(link, run("pytest", self.target, code=1))
+        self.assertNotIn("Private checks:", run("pytest", self.target, code=1, tty=False))
+        self.assertNotIn("Private checks:", run("pytest", self.target, code=1, scope={**env, "CI":"1"}))
+        self.assertNotIn("Private checks:", run("pytest", str(self.target)+"::test_first"))
+        self.server.bad_http_once = True
+        queued = run("pytest", self.target, code=1)
+        self.assertIn("queued", queued)
+        self.assertNotIn("Private checks:", queued)
+        self.assertEqual(run("sync"), "delivered\n" + link + "\n")
+        self.assertEqual(run("sync"), "nothing pending\n")
+        # The reporter drains eight at a time. An older batch cannot prove this pytest run was delivered.
+        now = int(time.time() * 1000)
+        with sqlite3.connect(self.db) as db:
+            db.executemany("INSERT INTO pending VALUES (?,?,?,?)", [(str(uuid.uuid4()),now-100+i,1,0) for i in range(17)])
+        self.assertNotIn("Private checks:", run("pytest", self.target, code=1))
+        self.assertEqual(run("sync", code=1), "queued\n" + link + "\n")
+        self.assertEqual(run("sync", tty=False), "delivered\n")
+        self.assertEqual(run("disconnect"), "disconnected\n")
+        self.assertEqual(run("sync"), "disconnected\n")
+
+    def test_sync_link_follows_its_acknowledged_app_across_a_reconnect(self):
+        self.connect("--queue-offline")
+        hosted = "https://tokensand.com/api/observability/v1/repository-checks"
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE connection SET endpoint=?", (hosted,))
+            db.execute("INSERT INTO pending VALUES (?,?,1,0)", (str(uuid.uuid4()), int(time.time()*1000)))
+        other = str(uuid.uuid4())
+        # Switch the active binding immediately after sync commits, before printing.
+        script = """
+import sqlite3, sys
+from tokensand_pytest import reporter, __main__
+path, other = sys.argv[1:]
+original = reporter._database
+class Reconnect(sqlite3.Connection):
+    def __exit__(self, *args):
+        result = super().__exit__(*args)
+        with sqlite3.connect(path) as changed:
+            changed.execute("UPDATE connection SET project=?",(other,))
+        return result
+reporter._database = lambda **_: sqlite3.connect(path, factory=Reconnect)
+reporter._call = lambda url, row: {"stored":True, "runId":row["runId"], "projectId":row["projectId"]}
+sys.stdout.isatty = lambda: True
+assert __main__.main(["sync"]) == 0
+reporter._database = original
+assert __main__.main(["results"]) == 0
+"""
+        env = {**self.env, "TOKENS_OBSERVE_INGEST_URL":hosted.replace("repository-checks","events")}
+        lines = self.call("-c", script, self.db, other, env=env).splitlines()
+        prefix = "https://tokensand.com/dashboard/agents?mode=developer&setup=repo&observeProjectId="
+        self.assertEqual(lines, ["delivered", "Private checks: "+prefix+PROJECT+"#repository-checks", prefix+other+"#repository-checks"])
 
     def test_plain_pytest_scopes_failed_and_repaired_results_and_disconnects(self):
         self.run_tests(code=1)

@@ -17,7 +17,7 @@ import uuid
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-WHEEL = Path(__file__).resolve().parents[1] / "packages/tokensand_pytest_checks-0.1.2-py3-none-any.whl"
+WHEEL = Path(__file__).resolve().parents[1] / "packages/tokensand_pytest_checks-0.1.3-py3-none-any.whl"
 sys.path.insert(0, str(WHEEL))
 from tokensand_pytest import __main__ as cli, reporter
 

@@ -9,7 +9,7 @@ import uuid
 
 import pytest
 
-from . import connection
+from . import connection, reporter
 from .capture import NativeReports
 
 
@@ -139,7 +139,11 @@ class ConnectedFile:
             return
         scores = {name: status == "passed" for name, status in cases}
         run_id = str(uuid.uuid4())
-        status = connection.report(self.checkout, self.selection, scores, run_id)
+        links = []
+        show_link = terminal and reporter.interactive_results(terminal.isatty)
+        status = connection.report(self.checkout, self.selection, scores, run_id, links.append if show_link else None)
         if terminal:
             terminal.write_line(f"Tokens& private check {run_id}: {status} ({sum(scores.values())} passed, "
                                 f"{len(scores) - sum(scores.values())} failed).")
+            if links:
+                terminal.write_line("Private checks: " + links[0])
