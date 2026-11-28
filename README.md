@@ -188,6 +188,16 @@ If a hosted reservation reports 20 retained comparisons, use the command above f
 
 For a first run, omit `--offline-workflow` and its path. The bundled retry example deliberately fails when the same tool call runs twice.
 
+### Did a group of cases regress?
+
+On each private result, choose **Download check results**. From the same workflow, put the earlier export first and pass the case and check IDs from your release checklist.
+
+```sh
+node "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_check_group.mjs" before.txt after.txt --brief --case delivery-stop --case telemetry-lookup --check top_result
+```
+
+Omit `--brief` for JSON. The review shows scores for the selected checks across the full dataset and your selected cases. It lists the trial numbers that regressed within each experiment and the case/check IDs still failing after the change. The readout includes both experiment IDs, the SDK-reported Git revision when available, and any recorded runtime warnings. It reads local text. Exit 0 means all selected candidate checks passed in the later complete evidence, 1 means some failed, and 2 means the evidence is incomplete or incompatible. The numbers come from the exports and do not certify a new run.
+
 ### Did my fix pass the original checks?
 
 With the skill installed, ask Codex or Claude Code to review one case using your before and after run directories and the earlier service checkout. The reviewer scores the saved outputs using your original checks. It keeps inputs and outputs on your machine.
