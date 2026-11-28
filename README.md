@@ -150,16 +150,28 @@ Choose a trusted offline test file or a pytest node ID. Each checkout uses its o
 
 The reviewer runs pytest once per checkout. It holds unexpected passes, skipped cases, incomplete runs and changed tests for review. An unexpected pass means the assertion passed while its expected-failure marker was active. A clean repair under the same controls exits 0, a held decision exits 100, and a setup error exits 1. The review shows case outcomes. Run the named test directly for its traceback. Tests and plugins keep their own network and tracing settings.
 
-The reviewer compares the files defining the selected tests, including inherited test methods, ancestor `conftest.py` files and active pytest configuration. Collected plain parameters count toward case identity, even when the pytest ID stays the same. For opaque objects, parametrize with a stable plain value and build the object in a fixture. Declare other fixture data with `--test-source PATH`.
+The reviewer checks each case’s test definition, its active checkout-local fixtures, ancestor `conftest.py` files and pytest configuration. Switching a case from the real implementation to a test double holds the review when it changes the fixture definition used. An edit anywhere in an exercised fixture file also holds it. Declare other assertion helpers and data files with `--test-source PATH`.
+
+Collected plain parameters count toward case identity even if the pytest ID stays the same. For opaque objects, parametrize with a stable plain value and build the object in a fixture.
 
 For a shared editable environment, the reviewer checks that project modules load from the checkout being tested. It holds the decision when a module loads from the wrong checkout.
 
 Ask your agent for a private release handoff. **“Show one expected and observed result per candidate, where each value came from, and which cases you checked.”**
 
-If you already have JUnit XML, the existing report-only command still works.
+To keep the outcomes from the original runs for a teammate, have pytest write JUnit XML when you run each revision. Use the same shell for both checkouts and keep both sets of test sources.
 
 ```sh
-python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_pytest.py" before.xml after.xml --before-root ../earlier-service --after-root . --test-source tests/test_workflow.py
+# From the earlier checkout
+export REVIEW_DIR="$(mktemp -d)"
+python -m pytest --junitxml="$REVIEW_DIR/before.xml" tests/test_workflow.py
+# From the repaired checkout
+python -m pytest --junitxml="$REVIEW_DIR/after.xml" tests/test_workflow.py
+```
+
+Point the reviewer at the two saved reports and both checkouts. Add any shared fixture, scorer helper or data file with another `--test-source PATH`. Review the summary before sharing it. Raw XML can contain assertion text, parameter values and captured output.
+
+```sh
+python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_pytest.py" "$REVIEW_DIR/before.xml" "$REVIEW_DIR/after.xml" --before-root ../earlier-service --after-root . --test-source tests/test_workflow.py
 ```
 
 XML can report a non-strict unexpected pass as an ordinary pass. Use the native run for that decision. [pytest expected-failure behavior](https://docs.pytest.org/en/stable/how-to/skipping.html#strict-parameter)

@@ -90,6 +90,103 @@ class NativeReview(unittest.TestCase):
         (self.after / "worker.py").write_text(original + fixed)
         self.assertIn("(recovered)", self.review(0, "test_worker.py"))
 
+    def test_changed_exercised_fixture_holds_a_false_repair(self):
+        for root in (self.before, self.after):
+            (root / "conftest.py").write_text('pytest_plugins = ["shared_backend", "unused_backend"]\n')
+            (root / "test_job.py").write_text(
+                "def test_delivery(request):\n"
+                "    run = request.getfixturevalue('delivery')\n"
+                "    assert run([1, 1]) == [1]\n"
+            )
+            self.worker(root, fixed=False)
+            (root / "unused_backend.py").write_text("import pytest\n@pytest.fixture\ndef idle(): return 1\n")
+        actual = "import pytest\nfrom worker import deliveries\n@pytest.fixture\ndef delivery(): return deliveries\n"
+        fake = actual.replace("return deliveries", "return lambda events: list(dict.fromkeys(events))")
+        (self.before / "shared_backend.py").write_text(actual)
+        (self.after / "shared_backend.py").write_text(fake)
+        held = self.review(100, "test_job.py")
+        self.assertIn('fixture source "shared_backend.py"', held)
+        self.assertNotIn("(recovered)", held)
+
+        (self.after / "shared_backend.py").write_text(actual)
+        (self.after / "unused_backend.py").write_text("import pytest\n@pytest.fixture\ndef idle(): return 2\n")
+        self.worker(self.after, fixed=True)
+        fixed = self.review(0, "test_job.py")
+        self.assertIn("(recovered)", fixed)
+        self.assertNotIn("unused_backend.py", fixed)
+
+    def test_same_session_fixtures_swapped_between_cases_hold(self):
+        for root in (self.before, self.after):
+            self.worker(root, fixed=False)
+            (root / "conftest.py").write_text('pytest_plugins = ["backends"]\n')
+            (root / "backends.py").write_text(
+                "import pytest\nfrom worker import deliveries\n"
+                "@pytest.fixture(scope='session')\ndef real(): return deliveries\n"
+                "@pytest.fixture(scope='session')\ndef stub(): return lambda events: list(dict.fromkeys(events))\n"
+            )
+            (root / "test_job.py").write_text(
+                "from pathlib import Path\n"
+                "def test_handles_one(real, stub): assert real([1]) == stub([1])\n"
+                "def test_deduplicates(request):\n"
+                "    backend = request.getfixturevalue(Path('backend.txt').read_text())\n"
+                "    assert backend([1, 1]) == [1]\n"
+            )
+        (self.before / "backend.txt").write_text("real")
+        (self.after / "backend.txt").write_text("stub")
+        held = self.review(100, "test_job.py")
+        self.assertIn("a case used different checkout-local fixture definitions", held)
+        self.assertNotIn("(recovered)", held)
+        (self.after / "backend.txt").write_text("real")
+        self.worker(self.after, fixed=True)
+        self.assertIn("(recovered)", self.review(0, "test_job.py"))
+
+    def test_cached_dispatcher_keeps_its_backend_across_warmup_and_reordering(self):
+        controls = '''from pathlib import Path
+import pytest
+from worker import deliveries
+
+@pytest.fixture(scope="session")
+def ordinary_backend():
+    return deliveries
+
+@pytest.fixture(scope="session")
+def reference_backend():
+    return lambda events: list(dict.fromkeys(events))
+
+@pytest.fixture(scope="module")
+def dispatcher(request):
+    backend = Path(__file__).with_name("backend.txt").read_text()
+    return request.getfixturevalue(backend)
+
+def pytest_collection_modifyitems(items):
+    if Path(__file__).with_name("order.txt").read_text() == "reversed":
+        items.reverse()
+'''
+        cases = '''def test_warm_both_backends(ordinary_backend, reference_backend, dispatcher):
+    assert ordinary_backend([1]) == reference_backend([1]) == dispatcher([1]) == [1]
+
+def test_retry(dispatcher):
+    assert dispatcher([1, 1]) == [1]
+'''
+        for root in (self.before, self.after):
+            (root / "conftest.py").write_text(controls)
+            (root / "test_dispatch.py").write_text(cases)
+            (root / "backend.txt").write_text("ordinary_backend")
+            (root / "order.txt").write_text("forward")
+
+        with self.subTest("both backends warmed, dispatcher switches to a double"):
+            self.worker(self.after, fixed=False)
+            (self.after / "backend.txt").write_text("reference_backend")
+            held = self.review(100, "test_dispatch.py")
+            self.assertIn("different checkout-local fixture", held)
+            self.assertNotIn("(recovered)", held)
+
+        with self.subTest("unchanged dispatcher, true fix, different cache warmup order"):
+            self.worker(self.after, fixed=True)
+            (self.after / "backend.txt").write_text("ordinary_backend")
+            (self.after / "order.txt").write_text("reversed")
+            self.assertIn("failed -> passed (recovered)", self.review(0, "test_dispatch.py"))
+
     def test_opaque_parameters_hold_without_repr(self):
         test = ("import pytest\nfrom worker import deliveries\n"
                 "class Arg:\n    def __repr__(self): raise RuntimeError('PRIVATE_repr')\n"

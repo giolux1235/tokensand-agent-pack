@@ -182,7 +182,7 @@ def review_status(before, after, sources, issues):
     return same_sources, comparable, eligible
 
 
-def verdict(before, after, sources, *, pytest_exits=None, issues=(), defining_sources=()):
+def verdict(before, after, sources, *, pytest_exits=None, issues=(), defining_sources=(), fixture_sources=()):
     native = pytest_exits is not None
     same_sources, comparable, eligible = review_status(before, after, sources, issues)
     mode = "native pytest review" if native else "pytest JUnit report review (XML outcomes only)"
@@ -200,6 +200,8 @@ def verdict(before, after, sources, *, pytest_exits=None, issues=(), defining_so
         label = "Declared source" if is_declared else ("Pytest control" if native else "Ancestor control")
         if path in defining_sources:
             label = "Defining test source"
+        if path in fixture_sources and not is_declared:
+            label = "Fixture source"
         print(f"{label} {json.dumps(str(path))}: {detail}")
     if not same_sources:
         print("Test sources or fixture/config files changed. Rerun both implementations with the same controls.")
@@ -219,8 +221,8 @@ def verdict(before, after, sources, *, pytest_exits=None, issues=(), defining_so
             print("A strict unexpected pass fails the native pytest policy.")
         if outcomes & {"xpassed", "xpassed-strict"}:
             print("An expected failure passed its assertion. Review the expectation and rerun both revisions under the same policy.")
-        print("Local runs compare the selected cases and their defining test sources. Pytest checks imports from the other checkout "
-              "and module origins in the root and selected src trees. Declare imported fixtures and data with --test-source.")
+        print("Local runs compare the selected cases, defining tests and exercised checkout-local fixture files. Pytest checks imports from the other checkout "
+              "and module origins in the root and selected src trees. Declare other assertion helpers and fixture data with --test-source.")
     else:
         print(SCOPE + " With both checkouts, use --run for native pytest outcomes.")
     return 0 if eligible else 100
@@ -371,7 +373,16 @@ def native_run(root, peer, interpreter, targets, destination, arm, source_dirs):
         elif any(not isinstance(row, list) or len(row) != 2 or not isinstance(row[0], str)
                  or Path(row[0]) not in hashes or type(row[1]) is not int or row[1] < 1 for row in locations):
             raise Invalid(f"The {arm} run has invalid test definitions.")
-    return cases, issues, result.returncode, config, digest, definitions, hashes
+    files, bindings = evidence.get("fixtureFiles"), evidence.get("caseFixtures")
+    if (not isinstance(files, list) or any(not isinstance(name, str) or Path(name) not in hashes for name in files)
+            or type(evidence.get("unresolvedFixture")) is not bool or not isinstance(bindings, dict)
+            or any(not isinstance(digest, str) or not re.fullmatch("[0-9a-f]{64}", digest) for digest in bindings.values())):
+        raise Invalid(f"The {arm} run omitted valid fixture evidence.")
+    if bindings.keys() != definitions.keys():
+        issues.append(f"{arm}: Fixture evidence is missing for a selected case.")
+    if evidence["unresolvedFixture"]:
+        issues.append(f"{arm}: A fixture definition could not be verified. Review its source before accepting the repair.")
+    return cases, issues, result.returncode, config, digest, definitions, hashes, (set(map(Path, files)), bindings)
 
 
 def run_review(args):
@@ -393,13 +404,15 @@ def run_review(args):
     source_dirs = sorted({str(parent / "src") for path in declared for parent in path.parents
                           if any((root / parent / "src").is_dir() for root in roots)})
     with tempfile.TemporaryDirectory(prefix="tokensand-pytest-") as temp:
-        before, first_issues, before_exit, before_config, before_digest, first_definitions, first_hashes = native_run(
+        before, first_issues, before_exit, before_config, before_digest, first_definitions, first_hashes, (first_fixture_files, first_bindings) = native_run(
             roots[0], roots[1], native_interpreter(roots[0], args.before_python),
             args.targets, Path(temp, "before.json"), "before", source_dirs)
-        after, last_issues, after_exit, after_config, after_digest, last_definitions, last_hashes = native_run(
+        after, last_issues, after_exit, after_config, after_digest, last_definitions, last_hashes, (last_fixture_files, last_bindings) = native_run(
             roots[1], roots[0], native_interpreter(roots[1], args.after_python),
             args.targets, Path(temp, "after.json"), "after", source_dirs)
     issues = list(dict.fromkeys(first_issues + last_issues))
+    if any(first_bindings[case] != last_bindings[case] for case in first_bindings.keys() & last_bindings.keys()):
+        issues.append("A case used different checkout-local fixture definitions. Verify both revisions with the same fixtures.")
     for nodeid in first_definitions.keys() & last_definitions.keys():
         if first_definitions[nodeid] != last_definitions[nodeid]:
             issues.append("A selected test resolved to a different definition. Rerun both implementations with the same test definition.")
@@ -420,7 +433,7 @@ def run_review(args):
     for path in sorted(other_definitions):
         sources.append((path, first_hashes.get(path), last_hashes.get(path), False))
     return verdict(before, after, sources, pytest_exits=(before_exit, after_exit), issues=issues,
-                   defining_sources=other_definitions)
+                   defining_sources=other_definitions, fixture_sources=first_fixture_files | last_fixture_files)
 
 
 def main():
