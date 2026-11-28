@@ -185,6 +185,17 @@ class InstalledConsumer(unittest.TestCase):
                 self.assertEqual(len(self.server.receipts), before + 1)
                 self.call("-m", "tokensand_pytest", "disconnect")
 
+    def test_discovered_bracket_directory_offers_no_ambiguous_pytest_command(self):
+        self.tests = self.repo / "src" / "commerce [US]"
+        self.tests.mkdir()
+        self.target = self.tests / "test_cart_price.py"
+        self.target.write_text(BROKEN)
+        self.connect()
+        output = self.run_tests("-k", "first", cwd=self.tests.parent)
+        self.assertIn("No portable command for this path", output)
+        self.assertNotIn(" -m pytest -- ", output)
+        self.assertEqual(len(self.server.attempts), 0)
+
     def test_full_file_hint_respects_persistent_offline_only_settings(self):
         (self.repo / "pytest.ini").write_text("[pytest]\naddopts = -m 'not live'\nmarkers = live: opt-in only\n")
         self.target.write_text("import pytest\ndef test_offline(): pass\n@pytest.mark.live\n"

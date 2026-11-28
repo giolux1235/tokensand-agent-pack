@@ -22,7 +22,8 @@ def full_file_command(target, checkout):
     name = Path(executable).name
     if shutil.which(name) == executable:
         executable = name
-    if not all(value.isprintable() for value in (executable, arg)) or "::" in arg:
+    # pytest reserves :: and [ for node IDs and parameter selections even in quoted paths.
+    if not all(value.isprintable() for value in (executable, arg)) or "::" in arg or "[" in arg:
         return None
     if sys.platform == "win32":
         # PowerShell's single quotes take literal input; smart quotes are also string delimiters.
@@ -123,9 +124,10 @@ class ConnectedFile:
                         shell, command = hint
                         terminal.write_line(f"For private counts, run the enrolled file from this directory ({shell}):")
                         terminal.write_line("  " + command)
+                        terminal.write_line("If it stays partial, enroll an offline-only file and keep the project’s test settings.")
                     else:
-                        terminal.write_line("For private counts, run the full enrolled test file.")
-                    terminal.write_line("If it stays partial, enroll an offline-only file and keep the project’s test settings.")
+                        terminal.write_line("No portable command for this path. Use an existing full-file test command, "
+                                            "or enroll an offline-only file with a plain path. Keep the project’s test settings.")
             return
         # The global pytest exit may include unrelated tests. Inspect only the selected file.
         selected_failed = any(stages.get("call") == "failed" for stages in self.reports.stages.values())
