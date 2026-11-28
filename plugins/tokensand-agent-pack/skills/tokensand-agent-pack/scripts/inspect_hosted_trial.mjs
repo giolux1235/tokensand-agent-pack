@@ -4,7 +4,7 @@ import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 
-const usage = "node inspect_hosted_trial.mjs RUN_DIRECTORY --result UUID_OR_PRIVATE_RESULT_URL --case CASE_ID (--trial 1 [--field FIELD_OR_POINTER] | --tool TOOL_NAME [--min-delta-ms 5]) [--plan PLAN_FILE]";
+const usage = "node inspect_hosted_trial.mjs RUN_DIRECTORY --result UUID_OR_PRIVATE_RESULT_URL (--tool-time [--min-delta-ms 5] | --case CASE_ID (--trial 1 [--field FIELD_OR_POINTER] | --tool TOOL_NAME [--min-delta-ms 5])) [--plan PLAN_FILE]";
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const isUuid = value => typeof value === "string" && uuid.test(value);
 const caseId = /^[a-z0-9_-]{1,80}$/i;
@@ -101,7 +101,7 @@ function toolMeasurement(arm, name) {
   if (!arm.complete) return { unavailable: "incomplete telemetry" };
   if (arm.tools.length === 32) return { unavailable: "span limit reached" };
   if (arm.tools.some(s => s.status === "interrupted")) return { unavailable: "interrupted tool timing" };
-  const calls = arm.tools.filter(s => s.name === name);
+  const calls = arm.tools.filter(s => name === undefined || s.name === name);
   if (!calls.length) return { unavailable: "tool not recorded" };
 
   let end = 0, active = 0;
@@ -127,13 +127,46 @@ function summarizeTool(pairs, name, minDeltaMs) {
     fasterTrialIds: comparable.filter(t => t.deltaMs < -minDeltaMs).map(t => t.trial), trials };
 }
 
+function recordedCalls(pairs, comparable, side) {
+  const counts = new Map();
+  for (const row of comparable) {
+    for (const span of pairs[row.trial - 1][side].tools) {
+      counts.set(span.name, (counts.get(span.name) ?? 0) + 1);
+    }
+  }
+  return Object.fromEntries([...counts].sort(([a], [b]) => a.localeCompare(b)));
+}
+
+function caseToolTime(id, pairs, threshold) {
+  const { trials, slowerTrialIds, fasterTrialIds } = summarizeTool(pairs, undefined, threshold);
+  const comparable = trials.filter(t => t.deltaMs !== null);
+  const deltas = comparable.map(t => t.deltaMs).sort((a, b) => a - b);
+  const lower = Math.floor((deltas.length - 1) / 2);
+  const upper = Math.floor(deltas.length / 2);
+  const median = deltas.length ? (deltas[lower] + deltas[upper]) / 2 : null;
+  const missing = trials.filter(t => t.deltaMs === null).map(t => ({
+    trial: t.trial, baseline: t.baseline.unavailable ?? null, candidate: t.candidate.unavailable ?? null
+  }));
+  return {
+    caseId: id, comparablePairs: comparable.length, plannedPairs: pairs.length,
+    medianPairedDeltaMs: median === null ? null : Number(median.toFixed(6)),
+    slowerTrialIds, fasterTrialIds,
+    recordedCalls: { baseline: recordedCalls(pairs, comparable, "baseline"), candidate: recordedCalls(pairs, comparable, "candidate") },
+    failedCalls: { baseline: comparable.reduce((n, t) => n + t.baseline.failedCalls, 0),
+      candidate: comparable.reduce((n, t) => n + t.candidate.failedCalls, 0) },
+    ...(missing.length ? { unavailablePairs: missing } : {})
+  };
+}
+
 async function inspect(directory, opts) {
   const expectedId = resultId(opts.result);
   const byTool = opts.tool !== undefined;
-  requireEvidence(caseId.test(opts.case) && (byTool !== (opts.trial !== undefined)), usage);
+  const allTools = opts["tool-time"] === true;
+  if (allTools) requireEvidence(opts.case === undefined && !byTool && opts.trial === undefined && opts.field === undefined, usage);
+  else requireEvidence(typeof opts.case === "string" && caseId.test(opts.case) && (byTool !== (opts.trial !== undefined)), usage);
   let minDeltaMs;
-  if (byTool) {
-    requireEvidence(safeToolName(opts.tool) && opts.field === undefined, usage);
+  if (byTool || allTools) {
+    requireEvidence((allTools || safeToolName(opts.tool)) && opts.field === undefined, usage);
     const threshold = opts["min-delta-ms"] ?? "5";
     requireEvidence(/^(?:0|[1-9][0-9]{0,5})(?:[.][0-9]{1,3})?$/.test(threshold) && Number(threshold) <= 180000, usage);
     minDeltaMs = Number(threshold);
@@ -161,22 +194,22 @@ async function inspect(directory, opts) {
   requireEvidence(cases.length > 0 && cases.length <= 10 && cases.every(id => typeof id === "string" && caseId.test(id)) &&
     new Set(cases).size === cases.length && checks.length > 0 && checks.length <= 16 &&
     checks.every(id => typeof id === "string" && checkId.test(id)) && new Set(checks).size === checks.length);
-  requireEvidence(cases.includes(opts.case) && (byTool || trial <= plan.repetitions), "The requested case or trial is outside the frozen plan.");
+  requireEvidence(allTools || (cases.includes(opts.case) && (byTool || trial <= plan.repetitions)), "The requested case or trial is outside the frozen plan.");
   const plannedCount = cases.length * plan.repetitions * 2;
   requireEvidence(plannedCount <= 60);
   requireEvidence(Array.isArray(result.runs) && result.runs.length <= plannedCount && (result.state !== "complete" || result.runs.length === plannedCount));
   const sessions = new Set(), identities = new Set();
-  const pairs = Array.from({ length: plan.repetitions }, () => ({}));
+  const byCase = new Map(cases.map(id => [id, Array.from({ length: plan.repetitions }, () => ({}))]));
   for (const [index, row] of result.runs.entries()) {
     requireEvidence(object(row) && cases.includes(row.caseId) && ["baseline", "candidate"].includes(row.variant) &&
       Number.isInteger(row.repetition) && row.repetition >= 0 && row.repetition < plan.repetitions && isUuid(row.sessionId));
     const key = [row.caseId, row.variant, row.repetition].join("/");
     requireEvidence(!sessions.has(row.sessionId.toLowerCase()) && !identities.has(key), "Duplicate session or trial in the saved result.");
     sessions.add(row.sessionId.toLowerCase()); identities.add(key);
-    if (row.caseId !== opts.case || (!byTool && row.repetition !== trial - 1)) continue;
+    if (!allTools && (row.caseId !== opts.case || (!byTool && row.repetition !== trial - 1))) continue;
     const tools = validatedTools(row, plan, checks);
-    const arms = pairs[row.repetition];
-    if (byTool) {
+    const arms = byCase.get(row.caseId)[row.repetition];
+    if (byTool || allTools) {
       const complete = row.telemetryComplete === true && Number.isSafeInteger(row.providerCalls) &&
         row.providerCalls >= 0 && row.eventIds.length === row.providerCalls;
       arms[row.variant] = { status: row.status, tools, complete };
@@ -192,6 +225,16 @@ async function inspect(directory, opts) {
     arms[row.variant] = { status: row.status, checks: row.checks, workflowMs: row.workflowMs, tools };
     if (field !== undefined) arms[row.variant].selectedOutput = selectedOutput(journal.output, field, selectedPath);
   }
+  if (allTools) {
+    const rows = cases.map(id => caseToolTime(id, byCase.get(id), minDeltaMs));
+    // Compare all repetitions before ranking. Partial rows stay visible after the complete cases.
+    rows.sort((a, b) => Number(b.comparablePairs === b.plannedPairs) - Number(a.comparablePairs === a.plannedPairs)
+      || (b.medianPairedDeltaMs ?? -Infinity) - (a.medianPairedDeltaMs ?? -Infinity)
+      || a.caseId.localeCompare(b.caseId));
+    return { source: "Recorded tool active time in the local copy of the hosted result, matched to its frozen plan",
+      resultId: expectedId, state: result.state, minDeltaMs, cases: rows };
+  }
+  const pairs = byCase.get(opts.case);
   if (byTool) return {
     source: "Recorded tool timings in the local copy of the hosted result, matched to its frozen plan",
     resultId: expectedId, state: result.state, caseId: opts.case, ...summarizeTool(pairs, opts.tool, minDeltaMs)
@@ -202,19 +245,37 @@ async function inspect(directory, opts) {
     caseId: opts.case, trial, baseline: arms.baseline, candidate: arms.candidate };
 }
 
+function printToolTime(summary) {
+  console.log(`Recorded tool time, candidate minus baseline. Changes within ${summary.minDeltaMs} ms count as even.`);
+  for (const row of summary.cases) {
+    const delta = row.medianPairedDeltaMs;
+    const change = delta === null ? "unavailable" : (delta > 0 ? "+" : "") + Number(delta.toFixed(2)) + " ms";
+    console.log(`${row.caseId}  ${change} median  ·  ${row.slowerTrialIds.length} slower, ${row.fasterTrialIds.length} faster  ·  ${row.comparablePairs}/${row.plannedPairs} pairs`);
+    const names = counts => Object.entries(counts).map(([name, n]) => name + " ×" + n).join(", ") || "none";
+    if (row.comparablePairs) console.log("  " + names(row.recordedCalls.baseline) + " → " + names(row.recordedCalls.candidate));
+    if (row.failedCalls.baseline || row.failedCalls.candidate) console.log(`  Timed failed calls  ${row.failedCalls.baseline} → ${row.failedCalls.candidate}`);
+    for (const pair of row.unavailablePairs ?? []) {
+      console.log(`  Trial ${pair.trial} · baseline ${pair.baseline ?? "recorded"}, candidate ${pair.candidate ?? "recorded"}`);
+    }
+  }
+  if (summary.state === "interrupted") console.log("Experiment interrupted. These are the recorded pairs.");
+}
+
 try {
   if (process.argv.length === 3 && process.argv[2] === "--help") console.log(usage);
   else {
     const { values, positionals, tokens } = parseArgs({ allowPositionals: true, tokens: true, options: {
       result: { type: "string" }, case: { type: "string" }, trial: { type: "string" }, field: { type: "string" },
-      plan: { type: "string" }, tool: { type: "string" }, "min-delta-ms": { type: "string" }
+      plan: { type: "string" }, tool: { type: "string" }, "tool-time": { type: "boolean" }, "min-delta-ms": { type: "string" }
     } });
     const flags = tokens.filter(item => item.kind === "option");
-    requireEvidence(positionals.length === 1 && values.result && values.case &&
+    requireEvidence(positionals.length === 1 && values.result && (values.case || values["tool-time"]) &&
       new Set(flags.map(item => item.name)).size === flags.length, usage);
     const summary = await inspect(positionals[0], values);
-    console.log(JSON.stringify(summary, null, 2));
-    if (values.tool && summary.comparableTrials < summary.plannedTrials) process.exitCode = 2;
+    if (values["tool-time"] && process.stdout.isTTY) printToolTime(summary);
+    else console.log(JSON.stringify(summary, null, 2));
+    if ((values.tool && summary.comparableTrials < summary.plannedTrials)
+        || (values["tool-time"] && (summary.state !== "complete" || summary.cases.some(row => row.comparablePairs < row.plannedPairs)))) process.exitCode = 2;
   }
 } catch (error) {
   console.error(error instanceof EvidenceError ? error.message : usage);
