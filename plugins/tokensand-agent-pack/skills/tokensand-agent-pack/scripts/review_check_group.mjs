@@ -39,7 +39,8 @@ function parseReport(text) {
   const workflow = header("Workflow: ", id), experiment = header("Experiment: ", uuid);
   const recorded = header("Recorded: ", /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
   need(Number.isFinite(Date.parse(recorded)) && new Date(recorded).toISOString() === recorded);
-  if (lines[i]?.startsWith("Git commit ")) header("Git commit (SDK-reported): ", /^[a-f0-9]{40}$/);
+  const gitCommit = lines[i]?.startsWith("Git commit ")
+    ? header("Git commit (SDK-reported): ", /^(?!0+$)(?:[a-f0-9]{40}|[a-f0-9]{64})$/) : null;
   const totals = /^Trials passed: candidate (\d+)\/(\d+), baseline (\d+)\/(\d+)$/.exec(lines[i++] || "");
   const changes = /^Matched checks: (\d+) newly failed, (\d+) recovered, (\d+) unscored pairs$/.exec(lines[i++] || "");
   need(totals && changes && totals[2] === totals[4]);
@@ -103,7 +104,7 @@ function parseReport(text) {
   }
   need(seenIssues.size === issues.size && transitions.every((count,k) => count === Number(changes[k+1])));
   need(trialPass[0] === Number(totals[3]) && trialPass[1] === Number(totals[1]));
-  return { workflow, experiment, recorded, hashes, cases, checks, repetitions, issues,
+  return { workflow, experiment, recorded, gitCommit, hashes, cases, checks, repetitions, issues,
     allChecksTrials: { baselinePassed: trialPass[0], candidatePassed: trialPass[1], plannedPerArm: planned } };
 }
 
@@ -157,7 +158,7 @@ function briefReview(result, reports) {
     const first = before[scope], last = after[scope];
     lines.push(`${title} (${first.uniqueCases} ${first.uniqueCases === 1 ? "case" : "cases"}) · baseline ${count(first.baseline)} → ${count(last.baseline)} · candidate ${count(first.candidate)} → ${count(last.candidate)}`);
   }
-  lines.push(`Latest selected candidate scores ${latestCandidateScores}. Selected evidence across the two independent experiments is ${selectedComparison}.`);
+  lines.push(`Latest selected candidate scores ${latestCandidateScores}. Selected score pairs are ${selectedComparison}.`);
   const outcomes = new Map();
   const label = {newlyFailing:"newly failing", stillFailing:"still failing", nowPassing:"now passing", incomplete:"incomplete candidate evidence"};
   for (const [status, ids] of Object.entries(candidateCasesAcrossExperiments)) for (const key of ids) outcomes.set(key, label[status]);
@@ -180,6 +181,8 @@ function briefReview(result, reports) {
 
   // Render only diagnostics validated by the exporter grammar. Group trials within each arm.
   for (const [index, report] of reports.entries()) {
+    const stage = index ? "Later" : "Earlier";
+    lines.push(`${stage} experiment ${report.experiment} · SDK-reported Git ${report.gitCommit ?? "unavailable"}`);
     const groups = new Map();
     for (const [identity, reason] of report.issues) {
       const [name, trial, arm] = identity.split("/");
@@ -187,7 +190,7 @@ function briefReview(result, reports) {
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(Number(trial));
     }
-    for (const [warning, trials] of groups) lines.push(`${index ? "Later" : "Earlier"} warning · ${warning} · trials ${trials.sort((a,b)=>a-b).join(", ")}`);
+    for (const [warning, trials] of groups) lines.push(`${stage} runtime warning · ${warning} · trials ${trials.sort((a,b)=>a-b).join(", ")}`);
   }
   lines.push("Recorded scores from local exports. No new evaluation was run.");
   return lines.join("\n");
@@ -211,7 +214,11 @@ function main() {
   need(before.repetitions===after.repetitions && before.checks.join("/")===after.checks.join("/") &&
     before.cases.size===after.cases.size && [...before.cases.keys()].every(n=>after.cases.has(n)), "The case, check or repetition matrix differs between reports.");
   need(names.every(n=>before.cases.has(n)) && checks.every(c=>before.checks.includes(c)), "A requested case or check is missing from the exports.");
-  const summarize = report => ({ experiment: report.experiment, recorded: report.recorded, allChecksTrials:report.allChecksTrials,
+  const summarize = report => ({ experiment: report.experiment, recorded: report.recorded, sdkReportedGitCommit:report.gitCommit,
+    runtimeWarnings:[...report.issues].map(([identity, diagnostic]) => {
+      const [caseId, trial, arm] = identity.split("/");
+      return { case:caseId, trial:Number(trial), arm, diagnostic };
+    }), allChecksTrials:report.allChecksTrials,
     overall:scopeReport(report,[...report.cases.keys()],checks,false),selected:scopeReport(report,names,checks,true) });
   const first=summarize(before),last=summarize(after);
   const comparable = !first.selected.unscoredPairs && !last.selected.unscoredPairs;

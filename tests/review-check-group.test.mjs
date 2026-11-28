@@ -106,6 +106,22 @@ test("brief prints both scopes, specific trials, unscored denominators and all p
   assert.equal(unknown.code,2);assert.match(unknown.text,/candidate 0\/0 scored \(2 planned\) → 2\/2/);
   assert.match(unknown.text,/Latest selected candidate scores passed.*incomplete/);
   assert.match(unknown.text,/unscored pairs on trials 1, 2/);
-  assert.match(unknown.text,/Earlier warning · baseline · ordinary · 1 recorded provider error, request accounting incomplete · trials 1/);
+  assert.match(unknown.text,/Earlier runtime warning · baseline · ordinary · 1 recorded provider error, request accounting incomplete · trials 1/);
   assert(!unknown.text.includes("touch executed"));
+});
+
+test("binds displayed identifiers to each export and keeps runtime warnings distinct from scored outcomes", () => {
+  const git64 = "b".repeat(64);
+  const first = report(1).replace("c".repeat(40), git64);
+  const second = report(2).replace("Git commit (SDK-reported): " + "c".repeat(40) + "\n", "")
+    .replace("0 unscored pairs", "0 unscored pairs\ncandidate · cursor · trial 1: request accounting incomplete");
+  const json=run(first,second);assert.equal(json.code,0);assert.equal(json.data.before.sdkReportedGitCommit,git64);
+  assert.equal(json.data.after.sdkReportedGitCommit,null);assert.equal(json.data.after.experiment,uuid(2));
+  assert.deepEqual(json.data.after.runtimeWarnings,[{case:"cursor",trial:1,arm:"candidate",diagnostic:"request accounting incomplete"}]);
+  const brief=run(first,second,[...defaults,"--brief"]).text;
+  assert(brief.includes("Selected score pairs are complete."));
+  assert(brief.includes("Earlier experiment "+uuid(1)+" · SDK-reported Git "+git64));
+  assert(brief.includes("Later experiment "+uuid(2)+" · SDK-reported Git unavailable"));
+  assert(brief.includes("Later runtime warning · candidate · cursor · request accounting incomplete · trials 1"));
+  assert.equal(run(report(1).replace("c".repeat(40),"0".repeat(40)),second).code,2);
 });
