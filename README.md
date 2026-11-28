@@ -152,6 +152,8 @@ The reviewer compares the files defining the selected tests, including inherited
 
 For a shared editable environment, the reviewer checks that project modules load from the checkout being tested. It holds the decision when a module loads from the wrong checkout.
 
+Ask your agent for a private release handoff. **“Show one expected and observed result per candidate, where each value came from, and which cases you checked.”**
+
 If you already have JUnit XML, the existing report-only command still works.
 
 ```sh
