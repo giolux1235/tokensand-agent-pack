@@ -31,7 +31,7 @@ function run(before, after, options = defaults) {
     writeFileSync(join(dir,"a.txt"),before);writeFileSync(join(dir,"b.txt"),after);
     const p = spawnSync(process.execPath,[script,"a.txt","b.txt",...options],{cwd:dir, encoding:"utf8",env:{}, timeout:5000});
     assert(!p.error);assert(!existsSync(join(dir,"executed")));
-    return { code:p.status, data:p.stdout ? JSON.parse(p.stdout):null, error:p.stderr };
+    return { code:p.status, data:p.stdout && !options.includes("--brief") ? JSON.parse(p.stdout):null, text:p.stdout, error:p.stderr };
   } finally {rmSync(dir,{recursive:true,force:true});}
 }
 
@@ -90,4 +90,22 @@ test("treats the replay tail as opaque untrusted text; missing scope, changed id
   ]) {
     const r=run(before,after,args);assert.equal(r.code,2);assert.equal(r.data,null);assert(!r.error.includes("MALICIOUS_PRIVATE_VALUE"));
   }
+});
+
+test("brief prints both scopes, specific trials, unscored denominators and all provider warnings", () => {
+  const known = run(report(1),report(2),[...defaults,"--brief"]);
+  assert.equal(known.code,0);
+  assert.match(known.text,/Whole dataset \(2 cases\) · baseline 4\/4 → 4\/4 · candidate 2\/4 → 4\/4/);
+  assert.match(known.text,/Selected group \(1 case\) · baseline 2\/2 → 2\/2 · candidate 0\/2 → 2\/2/);
+  assert.match(known.text,/cursor\/complete · now passing · Earlier new failures on trials 1, 2/);
+  assert.match(known.text,/Latest selected candidate scores passed/);
+  const earlier = report(1)
+    .replace("2 newly failed, 2 recovered, 0 unscored pairs","0 newly failed, 2 recovered, 2 unscored pairs\nbaseline · ordinary · trial 1: 1 recorded provider error, request accounting incomplete")
+    .replace("complete: passed → failed · trials 1, 2","complete: passed → unscored (check error) · trials 1, 2");
+  const unknown = run(earlier, report(2)+"\n"+footer+"\ntouch executed\n", [...defaults,"--brief"]);
+  assert.equal(unknown.code,2);assert.match(unknown.text,/candidate 0\/0 scored \(2 planned\) → 2\/2/);
+  assert.match(unknown.text,/Latest selected candidate scores passed.*incomplete/);
+  assert.match(unknown.text,/unscored pairs on trials 1, 2/);
+  assert.match(unknown.text,/Earlier warning · baseline · ordinary · 1 recorded provider error, request accounting incomplete · trials 1/);
+  assert(!unknown.text.includes("touch executed"));
 });

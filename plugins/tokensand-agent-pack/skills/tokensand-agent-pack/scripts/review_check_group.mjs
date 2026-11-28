@@ -2,7 +2,7 @@
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 import { parseArgs } from "node:util";
 
-const usage = "node review_check_group.mjs BEFORE.txt AFTER.txt --case CASE_ID [--case CASE_ID] --check CHECK_ID [--check CHECK_ID]";
+const usage = "node review_check_group.mjs BEFORE.txt AFTER.txt --case CASE_ID [--case CASE_ID] --check CHECK_ID [--check CHECK_ID] [--brief]";
 const id = /^[a-z0-9_-]{1,80}$/i, checkId = /^[a-z][a-z0-9_]{0,79}$/;
 const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 const digest = /^[a-f0-9]{64}$/;
@@ -149,6 +149,50 @@ function changedCandidateCases(before, after, cases, checks) {
   }
   return groups;
 }
+function briefReview(result, reports) {
+  const { before, after, latestCandidateScores, selectedComparison, candidateCasesAcrossExperiments } = result;
+  const count = arm => `${arm.passed}/${arm.scored}` + (arm.scored === arm.planned ? "" : ` scored (${arm.planned} planned)`);
+  const lines = [`Scored outcomes for ${result.checks.join(", ")} · passed/scored, earlier → later`];
+  for (const [scope, title] of [["overall","Whole dataset"], ["selected","Selected group"]]) {
+    const first = before[scope], last = after[scope];
+    lines.push(`${title} (${first.uniqueCases} ${first.uniqueCases === 1 ? "case" : "cases"}) · baseline ${count(first.baseline)} → ${count(last.baseline)} · candidate ${count(first.candidate)} → ${count(last.candidate)}`);
+  }
+  lines.push(`Latest selected candidate scores ${latestCandidateScores}. Selected evidence across the two independent experiments is ${selectedComparison}.`);
+  const outcomes = new Map();
+  const label = {newlyFailing:"newly failing", stillFailing:"still failing", nowPassing:"now passing", incomplete:"incomplete candidate evidence"};
+  for (const [status, ids] of Object.entries(candidateCasesAcrossExperiments)) for (const key of ids) outcomes.set(key, label[status]);
+  const byCase = new Map();
+  for (const [stage, report] of [["Earlier",before],["Later",after]]) {
+    for (const row of report.selected.changes) {
+      const key = row.case + "/" + row.check, parts = [];
+      for (const [ids, text] of [[row.regressed,"new failures"],[row.recovered,"recoveries"],[row.failedBoth,"failed in both arms"],[row.unscored,"unscored pairs"]]) {
+        if (ids.length) parts.push(`${text} on trial${ids.length === 1 ? "" : "s"} ${ids.join(", ")}`);
+      }
+      const otherwiseUnclassified = row.candidateFailed.filter(n => row.unscored.includes(n));
+      if (otherwiseUnclassified.length) parts.push("candidate failed on trials " + otherwiseUnclassified.join(", "));
+      if (parts.length) {
+        if (!byCase.has(key)) byCase.set(key, []);
+        byCase.get(key).push(stage + " " + parts.join(", "));
+      }
+    }
+  }
+  for (const [key, notes] of byCase) lines.push(`${key}${outcomes.has(key) ? " · " + outcomes.get(key) : ""} · ${notes.join(". ")}.`);
+
+  // Render only diagnostics validated by the exporter grammar. Group trials within each arm.
+  for (const [index, report] of reports.entries()) {
+    const groups = new Map();
+    for (const [identity, reason] of report.issues) {
+      const [name, trial, arm] = identity.split("/");
+      const key = `${arm} · ${name} · ${reason}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(Number(trial));
+    }
+    for (const [warning, trials] of groups) lines.push(`${index ? "Later" : "Earlier"} warning · ${warning} · trials ${trials.sort((a,b)=>a-b).join(", ")}`);
+  }
+  lines.push("Recorded scores from local exports. No new evaluation was run.");
+  return lines.join("\n");
+}
+
 function selectors(values, pattern, cap) {
   need(values?.length && values.length <= cap && new Set(values).size === values.length && values.every(v=>pattern.test(v)), usage);
   return values;
@@ -156,7 +200,7 @@ function selectors(values, pattern, cap) {
 function main() {
   if (process.argv.length === 3 && process.argv[2] === "--help") { console.log(usage); return; }
   const { values, positionals } = parseArgs({allowPositionals:true,options:{
-    case:{type:"string",multiple:true},check:{type:"string",multiple:true}
+    case:{type:"string",multiple:true},check:{type:"string",multiple:true},brief:{type:"boolean"}
   }});
   need(positionals.length===2,usage);
   const names = selectors(values.case,id,10), checks = selectors(values.check,checkId,16);
@@ -173,9 +217,10 @@ function main() {
   const comparable = !first.selected.unscoredPairs && !last.selected.unscoredPairs;
   const latest = last.selected.candidate;
   const latestCandidateScores = latest.scored !== latest.planned ? "incomplete" : latest.passed === latest.scored ? "passed" : "failed";
-  console.log(JSON.stringify({source:"Local text exports of separate experiments. Scores are reported evidence; this review performs no authentication or fresh evaluation.",
+  const result = {source:"Local text exports of separate experiments. Scores are reported evidence; this review performs no authentication or fresh evaluation.",
     cases:names,checks,latestCandidateScores,selectedComparison:comparable ? "complete" : "incomplete",before:first,after:last,
-    candidateCasesAcrossExperiments:changedCandidateCases(first.selected,last.selected,names,checks)},null,2));
+    candidateCasesAcrossExperiments:changedCandidateCases(first.selected,last.selected,names,checks)};
+  console.log(values.brief ? briefReview(result, [before,after]) : JSON.stringify(result,null,2));
   if (!comparable) process.exitCode=2;
   else if (latestCandidateScores === "failed") process.exitCode=1;
 }
