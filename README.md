@@ -165,7 +165,7 @@ XML can report a non-strict unexpected pass as an ordinary pass. Use the native 
 Open **Repository checks** in your [private app](https://tokensand.com/dashboard/agents?mode=developer&setup=repo) and enable it. In the Python environment that already runs your workflow tests, use the app’s `TOKENS_OBSERVE_INGEST_URL` and `TOKENS_OBSERVE_API_KEY`. Run these commands once from your trusted checkout, replacing `APP_ID` and the file path.
 
 ```sh
-python -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/pytest-checks-0.1.1/tokensand_pytest_checks-0.1.1-py3-none-any.whl
+python -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/pytest-checks-0.1.2/tokensand_pytest_checks-0.1.2-py3-none-any.whl
 python -m tokensand_pytest connect APP_ID tests/test_workflow.py
 ```
 
