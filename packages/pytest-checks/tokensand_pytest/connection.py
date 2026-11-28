@@ -59,7 +59,7 @@ def read(checkout):
         return selected(db)
 
 
-def report(checkout, selection, scores, run_id):
+def report(checkout, selection, scores, run_id, on_delivered=None):
     # Recheck the same consent under the writer's lock. A test can be running during a disconnect.
     return reporter.report_checks(scores, run_id=run_id, checkout=checkout,
-                                  grant=lambda db, binding: selected(db) == selection)
+                                  grant=lambda db, binding: selected(db) == selection, on_delivered=on_delivered)

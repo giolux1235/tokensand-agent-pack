@@ -44,7 +44,7 @@ def _uuid(value):
     return str(uuid.UUID(str(value)))
 
 
-def _database(create=False, checkout=None):
+def _database(create=False, checkout=None, *, readonly=False):
     git = subprocess.run(["git", "rev-parse", "--absolute-git-dir"], capture_output=True, text=True, cwd=checkout)
     if git.returncode:
         if create:
@@ -56,6 +56,8 @@ def _database(create=False, checkout=None):
         raise ValueError("Use the checkout’s own local database.")
     if not create and not dbfile.exists():
         return None
+    if readonly:
+        return sqlite3.connect(dbfile.as_uri() + "?mode=ro", uri=True, timeout=5)
     directory.mkdir(mode=0o700, exist_ok=True)
     if not dbfile.exists():
         with os.fdopen(os.open(dbfile, os.O_CREAT | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600), "wb"):
@@ -69,6 +71,33 @@ def _database(create=False, checkout=None):
                 passed INTEGER NOT NULL, failed INTEGER NOT NULL);
         """)
     return db
+
+
+def _results_url(binding):
+    if not binding or binding[0] != "https://tokensand.com/api/observability/v1/repository-checks":
+        return None
+    project = binding[1]
+    try:
+        identifier = uuid.UUID(str(project))
+        if str(identifier) != project or identifier.version not in range(1, 9):
+            return None
+    except ValueError:
+        return None
+    return f"https://tokensand.com/dashboard/agents?mode=developer&setup=repo&observeProjectId={project}#repository-checks"
+
+
+def results_url():
+    db = _database(readonly=True)
+    if db is None:
+        return None
+    try:
+        return _results_url(db.execute("SELECT endpoint,project FROM connection WHERE id=1").fetchone())
+    finally:
+        db.close()
+
+
+def interactive_results(is_terminal):
+    return is_terminal and not any(key in os.environ for key in ("CI", "GITHUB_ACTIONS", "BUILD_NUMBER", "TF_BUILD", "TEAMCITY_VERSION"))
 
 
 def _endpoint():
@@ -156,7 +185,32 @@ def _deliver(db, binding, row):
     return "delivered"
 
 
-def _work(action, scores=None, run_id=None, *, checkout=None, grant=None):
+def _send_pending(db, binding, rows, requested_run):
+    confirmed = False
+    try:
+        for row in rows:
+            outcome = _deliver(db, binding, row)
+            if outcome != "delivered":
+                return outcome, confirmed
+            if requested_run is None or row[0] == requested_run:
+                confirmed = True
+    except CertificateTrustError:
+        return ("queued; " if binding[3] else "") + TLS_ERROR, confirmed
+    except error.HTTPError as exc:
+        if exc.code in (401, 403, 404):
+            return "check app connection", confirmed
+        if exc.code in (400, 409, 410):
+            db.execute("DELETE FROM pending WHERE run=?", (row[0],))
+            return "receipt rejected", confirmed
+        return ("queued" if binding[3] else "delivery unavailable"), confirmed
+    except (OSError, HTTPException, ValueError, KeyError):
+        return ("queued" if binding[3] else "delivery unavailable"), confirmed
+    if db.execute("SELECT 1 FROM pending LIMIT 1").fetchone():
+        return "queued", confirmed
+    return ("delivered" if rows else "nothing pending"), confirmed
+
+
+def _work(action, scores=None, run_id=None, *, checkout=None, grant=None, on_delivered=None):
     db = _database(checkout=checkout)
     if db is None:
         return "disconnected"
@@ -203,32 +257,20 @@ def _work(action, scores=None, run_id=None, *, checkout=None, grant=None):
                 rows = db.execute("SELECT run,completed,passed,failed FROM pending ORDER BY completed LIMIT 8").fetchall()
             else:
                 rows = [fresh] if fresh else []
-            try:
-                for row in rows:
-                    outcome = _deliver(db, binding, row)
-                    if outcome != "delivered":
-                        return outcome
-            except CertificateTrustError:
-                return ("queued; " if binding[3] else "") + TLS_ERROR
-            except error.HTTPError as exc:
-                if exc.code in (401, 403, 404):
-                    return "check app connection"
-                if exc.code in (400, 409, 410):
-                    db.execute("DELETE FROM pending WHERE run=?", (row[0],))
-                    return "receipt rejected"
-                return "queued" if binding[3] else "delivery unavailable"
-            except (OSError, HTTPException, ValueError, KeyError):
-                return "queued" if binding[3] else "delivery unavailable"
-            if db.execute("SELECT 1 FROM pending LIMIT 1").fetchone():
-                return "queued"
-            return "delivered" if rows else "nothing pending"
+            status, confirmed = _send_pending(db, binding, rows, fresh[0] if fresh else None)
+        # This binding produced a confirmed receipt and the local transaction committed.
+        if confirmed and on_delivered is not None:
+            url = _results_url(binding)
+            if url:
+                on_delivered(url)
+        return status
     finally:
         db.close()
 
 
-def report_checks(scores, *, run_id=None, checkout=None, grant=None):
+def report_checks(scores, *, run_id=None, checkout=None, grant=None, on_delivered=None):
     """Pass one bool per expected assertion or None if a predicate never returned."""
     try:
-        return _work("report", scores, run_id, checkout=checkout, grant=grant)
+        return _work("report", scores, run_id, checkout=checkout, grant=grant, on_delivered=on_delivered)
     except (OSError, HTTPException, sqlite3.Error, TypeError, ValueError, AttributeError):
         return "report unavailable"
