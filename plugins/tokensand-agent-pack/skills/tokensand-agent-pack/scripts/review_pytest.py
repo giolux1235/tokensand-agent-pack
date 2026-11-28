@@ -301,14 +301,15 @@ NATIVE_ISSUES = {
 }
 
 
-def native_run(root, peer, interpreter, targets, destination, arm, source_dirs):
+def native_run(root, peer, interpreter, targets, destination, arm, source_dirs, *, keep_failures=False):
     if not interpreter.is_file():
         raise Invalid(f"The {arm} interpreter is missing. Set --{arm}-python to this checkout’s Python with pytest installed.")
     helper = Path(__file__).with_name("tokensand_pytest_definitions.py").resolve(strict=True)
     # The child uses the project's own environment. Test output and marker reasons stay private.
     definitions_file = destination.with_suffix(".definitions.json")
     env = interpreter_environment(interpreter, root, peer, source_dirs)
-    result = subprocess.run([str(interpreter), str(helper), str(destination), *targets],
+    detail_args = ["--tokensand-private-failures"] if keep_failures else []
+    result = subprocess.run([str(interpreter), str(helper), str(destination), *detail_args, *targets],
                             cwd=root, env=env, stdin=subprocess.DEVNULL,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not destination.is_file():
@@ -385,8 +386,60 @@ def native_run(root, peer, interpreter, targets, destination, arm, source_dirs):
     return cases, issues, result.returncode, config, digest, definitions, hashes, (set(map(Path, files)), bindings)
 
 
+def read_failure_details(path, cases, arm):
+    invalid = Invalid(f"The {arm} private failure details are incomplete or invalid.")
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > LIMIT:
+        raise invalid
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or set(data) != {"failures", "omitted"}:
+        raise invalid
+    rows, omitted = data["failures"], data["omitted"]
+    if (not isinstance(rows, list) or len(rows) > 100 or type(omitted) is not int or omitted < 0
+            or (omitted and len(rows) != 100)):
+        raise invalid
+    expected = {}
+    for (group, name), state in cases.items():
+        if state in {"failed", "error", "xpassed-strict"}:
+            node = f"{group}::{name}" if group else name
+            expected[hashlib.sha256(node.encode()).hexdigest()] = (node, state)
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"caseHash", "nodeid", "phase", "message", "truncated"}:
+            raise invalid
+        fingerprint, phase = row.pop("caseHash"), row["phase"]
+        if (not isinstance(fingerprint, str) or fingerprint not in expected or phase not in ("call", "setup", "teardown")
+                or (fingerprint, phase) in seen or not isinstance(row["message"], str) or len(row["message"]) > 8192
+                or not isinstance(row["nodeid"], str) or not 0 < len(row["nodeid"]) <= 4096
+                or type(row["truncated"]) is not bool):
+            raise invalid
+        node, state = expected[fingerprint]
+        raw_node = re.sub(r"\[parameter-sha256=[0-9a-f]{64}\]$", "", node)
+        if row["nodeid"] not in (node[:4096], raw_node[:4096]) or (phase != "call" and state != "error"):
+            raise invalid
+        seen.add((fingerprint, phase))
+    if len(expected.keys() - {key for key, _ in seen}) > omitted or len(rows) + omitted > 3 * len(expected):
+        raise invalid
+    return data
+
+
+def write_failure_report(path, reports):
+    # Publish a complete pair exclusively, even if two reviews chose the same path.
+    with tempfile.TemporaryDirectory(prefix=".tokensand-report-", dir=path.parent) as staging:
+        staged = Path(staging, "report.json")
+        with os.fdopen(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as stream:
+            json.dump({"schema": "tokensand-pytest-failures-v1", **reports}, stream, indent=2)
+            stream.write("\n")
+        try:
+            os.link(staged, path)
+        except FileExistsError as exc:
+            raise Invalid("Choose a new private failure report path. The selected path already exists.") from exc
+
+
 def run_review(args):
     roots = checkout_roots(args)
+    report_path = args.failure_report
+    if report_path and (os.path.lexists(report_path) or not report_path.parent.is_dir()):
+        raise Invalid("Choose a new private failure report path in an existing directory.")
     if roots[0] == roots[1]:
         raise Invalid("Choose separate earlier and later checkouts.")
     files = []
@@ -406,10 +459,13 @@ def run_review(args):
     with tempfile.TemporaryDirectory(prefix="tokensand-pytest-") as temp:
         before, first_issues, before_exit, before_config, before_digest, first_definitions, first_hashes, (first_fixture_files, first_bindings) = native_run(
             roots[0], roots[1], native_interpreter(roots[0], args.before_python),
-            args.targets, Path(temp, "before.json"), "before", source_dirs)
+            args.targets, Path(temp, "before.json"), "before", source_dirs, keep_failures=bool(report_path))
         after, last_issues, after_exit, after_config, after_digest, last_definitions, last_hashes, (last_fixture_files, last_bindings) = native_run(
             roots[1], roots[0], native_interpreter(roots[1], args.after_python),
-            args.targets, Path(temp, "after.json"), "after", source_dirs)
+            args.targets, Path(temp, "after.json"), "after", source_dirs, keep_failures=bool(report_path))
+        if report_path:
+            reports = {arm: read_failure_details(Path(temp, arm + ".failures.json"), cases, arm)
+                       for arm, cases in (("before", before), ("after", after))}
     issues = list(dict.fromkeys(first_issues + last_issues))
     if any(first_bindings[case] != last_bindings[case] for case in first_bindings.keys() & last_bindings.keys()):
         issues.append("A case used different checkout-local fixture definitions. Verify both revisions with the same fixtures.")
@@ -432,6 +488,8 @@ def run_review(args):
     other_definitions = (first_hashes.keys() | last_hashes.keys()) - {path for path, *_ in sources}
     for path in sorted(other_definitions):
         sources.append((path, first_hashes.get(path), last_hashes.get(path), False))
+    if report_path:
+        write_failure_report(report_path, reports)
     return verdict(before, after, sources, pytest_exits=(before_exit, after_exit), issues=issues,
                    defining_sources=other_definitions, fixture_sources=first_fixture_files | last_fixture_files)
 
@@ -444,6 +502,8 @@ def main():
         parser.add_argument("--before-python", metavar="INTERPRETER", help="absolute path or path relative to the earlier checkout")
         parser.add_argument("--after-python", metavar="INTERPRETER", help="absolute path or path relative to the later checkout")
         parser.add_argument("--test-source", action="append", type=Path, default=[], metavar="RELATIVE_PATH")
+        parser.add_argument("--failure-report", type=Path, metavar="NEW_FILE",
+                            help="save original pytest failure messages and case IDs locally; can contain private test data")
         parser.add_argument("targets", nargs="+", metavar="FILE[::NODE]")
         return execute(run_review, parser.parse_args(sys.argv[2:]))
     parser = Arguments(description=__doc__, epilog="Use --run --help to review native pytest outcomes from two trusted checkouts.")

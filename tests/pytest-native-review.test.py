@@ -3,6 +3,7 @@ from importlib.util import find_spec
 import json
 import os
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import sysconfig
@@ -58,6 +59,63 @@ class NativeReview(unittest.TestCase):
         self.assertEqual(result.returncode, expected, message)
         self.assertNotIn("PRIVATE_", message)
         return message.lower()
+
+    def test_requested_private_report_keeps_original_failure_out_of_terminal(self):
+        report = self.root / "diagnosis.json"
+        self.review(0, "--failure-report", str(report), TARGET)
+        if os.name == "posix":
+            self.assertEqual(report.stat().st_mode & 0o777, 0o600)
+        data = json.loads(report.read_text())
+        self.assertEqual(data["schema"], "tokensand-pytest-failures-v1")
+        self.assertEqual(data["after"], {"failures": [], "omitted": 0})
+        self.assertEqual(data["before"]["omitted"], 0)
+        failure, = data["before"]["failures"]
+        self.assertIn("PRIVATE_tenant_id", failure["nodeid"])
+        self.assertIn("PRIVATE_assertion_details", failure["message"])
+        self.assertEqual(failure["phase"], "call")
+        self.assertFalse(failure["truncated"])
+        self.assertNotIn("PRIVATE_worker_output", report.read_text())
+
+        original = report.read_bytes()
+        self.assertIn("new private failure report path",
+                      self.review(1, "--failure-report", str(report), TARGET))
+        self.assertEqual(report.read_bytes(), original)
+
+    def test_private_report_handles_setup_failure_and_incomplete_run(self):
+        for root in (self.before, self.after):
+            (root / "conftest.py").write_text(
+                "import pytest\n@pytest.fixture(autouse=True)\ndef prepare():\n"
+                "    raise ValueError('PRIVATE_setup_diagnostic')\n")
+        report = self.root / "setup.json"
+        self.review(100, "--failure-report", str(report), TARGET)
+        data = json.loads(report.read_text())
+        for arm in ("before", "after"):
+            failure, = data[arm]["failures"]
+            self.assertEqual(failure["phase"], "setup")
+            self.assertIn("PRIVATE_setup_diagnostic", failure["message"])
+        missing = self.root / "incomplete.json"
+        (self.after / "test_worker.py").write_text("this is not valid python\n")
+        self.review(1, "--failure-report", str(missing), TARGET)
+        self.assertFalse(missing.exists())
+
+    def test_private_report_marks_limits_and_rejects_missing_original_failures(self):
+        for root in (self.before, self.after):
+            (root / "test_limits.py").write_text(
+                "import pytest\nfrom worker import deliveries\n"
+                "@pytest.mark.parametrize('n', range(101))\ndef test_size(n):\n"
+                "    assert len(deliveries([n, n])) == 1, 'PRIVATE_' + ('x' * 8300)\n")
+        path = self.root / "bounded.json"
+        self.review(0, "--failure-report", str(path), "test_limits.py")
+        before = json.loads(path.read_text())["before"]
+        self.assertEqual(before["omitted"], 1)
+        self.assertEqual(len(before["failures"]), 100)
+        self.assertTrue(all(r["truncated"] and len(r["message"]) == 8192 for r in before["failures"]))
+
+        reader = runpy.run_path(str(SCRIPT))
+        for malformed in ({}, {"failures": [], "omitted": 0}, {"failures": [], "omitted": 1}):
+            path.write_text(json.dumps(malformed))
+            with self.assertRaises(reader["Invalid"]):
+                reader["read_failure_details"](path, {("test_limits.py", "test_size"): "failed"}, "before")
 
     def test_non_strict_xpass_is_held_with_case_status(self):
         self.worker(self.after, fixed=True, experimental=True)

@@ -148,7 +148,16 @@ python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_pytest.py" --r
 
 Choose a trusted offline test file or a pytest node ID. Each checkout uses its own `.venv` when present, otherwise the Python running the reviewer. For another environment, pass its interpreter path with `--before-python` or `--after-python`. For a project-local skill, use `.agents/skills` or `.claude/skills` in the script path.
 
-The reviewer runs pytest once per checkout. It holds unexpected passes, skipped cases, incomplete runs and changed tests for review. An unexpected pass means the assertion passed while its expected-failure marker was active. A clean repair under the same controls exits 0, a held decision exits 100, and a setup error exits 1. The review shows case outcomes. Run the named test directly for its traceback. Tests and plugins keep their own network and tracing settings.
+The reviewer runs pytest once per checkout. It holds unexpected passes, skipped cases, incomplete runs and changed tests for review. An unexpected pass means the assertion passed while its expected-failure marker was active. A clean repair under the same controls exits 0, a held decision exits 100, and a setup error exits 1. Tests and plugins keep their own network and tracing settings.
+
+To see why a case failed on that run, save its original pytest message. The report includes full case IDs and may contain private assertion values. Keep it outside the repository. If your CI already saved JUnit XML, read the failed case there directly.
+
+```sh
+review_dir="$(mktemp -d)"
+python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_pytest.py" --run --before-root ../earlier-service --failure-report "$review_dir/failures.json" tests/test_workflow.py
+```
+
+The file groups failures by checkout and pytest phase. Each side keeps up to 100 messages and marks any omissions or truncation. The terminal summary keeps its existing redaction.
 
 The reviewer checks each case’s test definition, its active checkout-local fixtures, ancestor `conftest.py` files and pytest configuration. Switching a case from the real implementation to a test double holds the review when it changes the fixture definition used. An edit anywhere in an exercised fixture file also holds it. Declare other assertion helpers and data files with `--test-source PATH`.
 

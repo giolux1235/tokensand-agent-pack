@@ -22,6 +22,27 @@ source_digests = {}
 fixture_locations = {}
 case_fixtures = {}
 unresolved_fixture = False
+private_failures = None
+omitted_failures = 0
+
+
+def pytest_runtest_logreport(report):
+    """Keep the original native failure only when the private report was requested."""
+    global omitted_failures
+    if private_failures is None or not report.failed:
+        return
+    if len(private_failures) >= 100:
+        omitted_failures += 1
+        return
+    crash = getattr(report.longrepr, "reprcrash", None)
+    message = getattr(crash, "message", None)
+    if not isinstance(message, str):
+        message = report.longrepr if isinstance(report.longrepr, str) else "Pytest supplied no plain failure message."
+    # Do not append the captured stdout, stderr or log sections.
+    identity = review_ids.get(report.nodeid, report.nodeid)
+    private_failures.append({"caseHash": hashlib.sha256(identity.encode()).hexdigest(),
+                             "nodeid": report.nodeid[:4096], "phase": report.when,
+                             "message": message[:8192], "truncated": len(message) > 8192 or len(report.nodeid) > 4096})
 
 # A FixtureDef is reused across parametrized/scope cache lifetimes. Its current
 # instance changes only when pytest actually calls the setup hook.
@@ -227,6 +248,10 @@ if __name__ == "__main__":
     # Attach this exact module to the original native runner. A checkout may
     # have a Python module with the same filename as either bundled script.
     capture = runpy.run_path(str(Path(__file__).with_name("capture_pytest.py")))
+    targets = sys.argv[2:]
+    if targets[:1] == ["--tokensand-private-failures"]:
+        private_failures = []
+        targets = targets[1:]
     fixture_request = getattr(pytest, "FixtureRequest", None)
     getter = getattr(fixture_request, "getfixturevalue", None)
     tracked_getter = track_fixture_getter(getter)
@@ -235,13 +260,16 @@ if __name__ == "__main__":
     else:
         unresolved_fixture = True
     try:
-        status = capture["main"]([sys.argv[1], "-p", "__main__", *sys.argv[2:]])
+        status = capture["main"]([sys.argv[1], "-p", "__main__", *targets])
     finally:
         if callable(getter):
             if fixture_request.getfixturevalue is not tracked_getter:
                 unresolved_fixture = True
             fixture_request.getfixturevalue = getter
     destination = Path(sys.argv[1])
+    if private_failures is not None:
+        with destination.with_suffix(".failures.json").open("x", encoding="utf-8") as output:
+            json.dump({"failures": private_failures, "omitted": omitted_failures}, output)
     hashes = {path.relative_to(checkout).as_posix(): value for path, value in source_digests.items()}
     with destination.with_suffix(".definitions.json").open("x", encoding="utf-8") as output:
         fixture_files = sorted({name for locations in fixture_locations.values() for name, _ in locations})
