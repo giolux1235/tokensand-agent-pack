@@ -1,4 +1,8 @@
 """Submit the selected file's aggregate only after a complete, scored native pytest run."""
+import os
+from pathlib import Path
+import shlex
+import shutil
 import sqlite3
 import sys
 import uuid
@@ -7,6 +11,28 @@ import pytest
 
 from . import connection
 from .capture import NativeReports
+
+
+def full_file_command(target, checkout):
+    # pytest receives a path relative to its original invocation, including from a subdirectory.
+    arg = "./" + Path(os.path.relpath(target, checkout)).as_posix()
+    executable = sys.executable
+    if not executable:
+        return None
+    name = Path(executable).name
+    if shutil.which(name) == executable:
+        executable = name
+    # pytest reserves :: and [ for node IDs and parameter selections even in quoted paths.
+    if not all(value.isprintable() for value in (executable, arg)) or "::" in arg or "[" in arg:
+        return None
+    if sys.platform == "win32":
+        # PowerShell's single quotes take literal input; smart quotes are also string delimiters.
+        if any(char in value for value in (executable, arg) for char in "‘’‚‛"):
+            return None
+        def literal(value):
+            return "'" + value.replace("'", "''") + "'"
+        return "PowerShell", f"& {literal(executable)} -m pytest -- {literal(arg)}"
+    return "shell", shlex.join([executable, "-m", "pytest", "--", arg])
 
 
 def pytest_configure(config):
@@ -92,6 +118,16 @@ class ConnectedFile:
                 or bool(session.testsfailed) != bool(session.exitstatus)):
             if terminal:
                 terminal.write_line("Tokens&: partial run; no private counts sent.")
+                if self.explicit_subset or self.collected != set(self.reports.selected):
+                    hint = full_file_command(self.target, self.checkout)
+                    if hint:
+                        shell, command = hint
+                        terminal.write_line(f"For private counts, run the enrolled file from this directory ({shell}):")
+                        terminal.write_line("  " + command)
+                        terminal.write_line("If it stays partial, enroll an offline-only file and keep the project’s test settings.")
+                    else:
+                        terminal.write_line("No portable command for this path. Use an existing full-file test command, "
+                                            "or enroll an offline-only file with a plain path. Keep the project’s test settings.")
             return
         # The global pytest exit may include unrelated tests. Inspect only the selected file.
         selected_failed = any(stages.get("call") == "failed" for stages in self.reports.stages.values())

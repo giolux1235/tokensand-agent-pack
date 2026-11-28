@@ -13,7 +13,7 @@ import unittest
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
-WHEEL = ROOT / "packages/tokensand_pytest_checks-0.1.1-py3-none-any.whl"
+WHEEL = ROOT / "packages/tokensand_pytest_checks-0.1.2-py3-none-any.whl"
 CAPTURE = ROOT / "plugins/tokensand-agent-pack/skills/tokensand-agent-pack/scripts/capture_pytest.py"
 PROJECT, EPOCH = str(uuid.uuid4()), str(uuid.uuid4())
 ENDPOINT = "/api/observability/v1/repository-checks"
@@ -149,6 +149,81 @@ class InstalledConsumer(unittest.TestCase):
         self.assertEqual(self.server.attempts, [])
         with sqlite3.connect(self.db) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM pending").fetchone()[0], 0)
+
+    def test_partial_run_offers_executable_full_file_command_for_each_selector(self):
+        self.tests = self.repo / "src" / "-team's checks"
+        self.tests.mkdir()
+        self.target = self.tests / "test_release.py"
+        self.target.write_text("import pytest\n@pytest.mark.parametrize('case', [1, 2], ids=['draft','repair'])\n"
+                               "def test_release(case): assert case == 1\n")
+        (self.tests.parent / "conftest.py").write_text(
+            "def pytest_addoption(parser): parser.addoption('--case')\n"
+            "def pytest_collection_modifyitems(config, items):\n"
+            " case = config.getoption('--case')\n"
+            " if case:\n"
+            "  removed = [i for i in items if case not in i.nodeid]\n"
+            "  config.hook.pytest_deselected(items=removed)\n"
+            "  items[:] = [i for i in items if i not in removed]\n")
+        for queued, selector in [(False, ["--case", "draft"]), (True, ["-k", "draft"]),
+                                 (True, ["::test_release[draft]"])]:
+            with self.subTest(queued=queued, selector=selector):
+                self.connect(*(["--queue-offline"] if queued else []))
+                cwd = self.tests.parent
+                relative = "./" + self.target.relative_to(cwd).as_posix()
+                args = [relative + selector[0]] if selector[0].startswith("::") else [relative, *selector]
+                before = len(self.server.receipts)
+                output = self.run_tests(*args, cwd=cwd)
+                self.assertIn("partial run; no private counts sent", output)
+                self.assertEqual(len(self.server.receipts), before)
+                self.assertIn("keep the project’s test settings", output)
+                command = next(line.strip() for line in output.splitlines() if line.startswith("  ") and " -m pytest" in line)
+                self.assertNotIn("draft", command)
+                shell = ["powershell", "-NoProfile", "-Command"] if os.name == "nt" else ["/bin/sh", "-c"]
+                ran = subprocess.run([*shell, command], cwd=cwd, env=self.env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(ran.returncode, 1, ran.stdout + ran.stderr)
+                self.assertIn("delivered (1 passed, 1 failed)", ran.stdout)
+                self.assertEqual(len(self.server.receipts), before + 1)
+                self.call("-m", "tokensand_pytest", "disconnect")
+
+    def test_discovered_bracket_directory_offers_no_ambiguous_pytest_command(self):
+        self.tests = self.repo / "src" / "commerce [US]"
+        self.tests.mkdir()
+        self.target = self.tests / "test_cart_price.py"
+        self.target.write_text(BROKEN)
+        self.connect()
+        output = self.run_tests("-k", "first", cwd=self.tests.parent)
+        self.assertIn("No portable command for this path", output)
+        self.assertNotIn(" -m pytest -- ", output)
+        self.assertEqual(len(self.server.attempts), 0)
+
+    def test_full_file_hint_respects_persistent_offline_only_settings(self):
+        (self.repo / "pytest.ini").write_text("[pytest]\naddopts = -m 'not live'\nmarkers = live: opt-in only\n")
+        self.target.write_text("import pytest\ndef test_offline(): pass\n@pytest.mark.live\n"
+                               "def test_live(): raise AssertionError('must stay excluded')\n")
+        self.connect()
+        for args in [(str(self.target) + "::test_offline",), (str(self.target),)]:
+            output = self.run_tests(*args)
+            self.assertIn("partial run; no private counts sent", output)
+            self.assertIn("enroll an offline-only file", output)
+            self.assertEqual(len(self.server.attempts), 0)
+
+    def test_report_command_quotes_powershell_and_omits_unrenderable_paths(self):
+        output = self.call("-c", """
+import sys
+from pathlib import Path
+from unittest.mock import patch
+from tokensand_pytest.plugin import full_file_command
+root = Path.cwd()
+with patch.object(sys, "platform", "win32"), patch("tokensand_pytest.plugin.shutil.which", return_value=sys.executable):
+    shell, command = full_file_command(root / "-team's files" / "test_flags.py", root)
+    assert shell == "PowerShell" and command.startswith("& '")
+    assert command.endswith(" -m pytest -- './-team''s files/test_flags.py'")
+    assert full_file_command(root / "team‘quoted’" / "test_flags.py", root) is None
+assert full_file_command(root / "file::ambiguous.py", root) is None
+assert full_file_command(root / ("unprintable" + chr(27) + ".py"), root) is None
+print("command boundaries passed")
+""")
+        self.assertIn("command boundaries passed", output)
 
     def test_skips_expected_failures_and_incomplete_runs_never_score(self):
         self.connect()
