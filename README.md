@@ -167,11 +167,11 @@ XML can report a non-strict unexpected pass as an ordinary pass. Use the native 
 Open **Repository checks** in your [private app](https://tokensand.com/dashboard/agents?mode=developer&setup=repo) and enable it. In the Python environment that already runs your workflow tests, use the app’s `TOKENS_OBSERVE_INGEST_URL` and `TOKENS_OBSERVE_API_KEY`. Run these commands once from your trusted checkout, replacing `APP_ID` and the file path.
 
 ```sh
-python -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/pytest-checks-0.1.2/tokensand_pytest_checks-0.1.2-py3-none-any.whl
+python -m pip install https://github.com/giolux1235/tokensand-agent-pack/releases/download/pytest-checks-0.1.3/tokensand_pytest_checks-0.1.3-py3-none-any.whl
 python -m tokensand_pytest connect APP_ID tests/test_workflow.py
 ```
 
-Run pytest as usual. A focused case stays local. For private counts, run the complete enrolled file, for example `python -m pytest -- ./tests/test_workflow.py` from this checkout. A fully scored run prints a receipt ID and delivery status. The private app shows the counts after delivery. Case names and tracebacks stay in your terminal. This requires Python 3.10+ and pytest 7+. If this workflow already sends Tokens& checks, keep its existing reporter.
+Run pytest as usual. A focused case stays local. For private counts, run the complete enrolled file, for example `python -m pytest -- ./tests/test_workflow.py` from this checkout. After delivery, open **Private checks** in your terminal for this app’s recent counts. In Codex, Claude Code or a piped shell, run `python -m tokensand_pytest results` to get the same link. Case names and tracebacks stay local. This requires Python 3.10+ and pytest 7+. If this workflow already sends Tokens& checks, keep its existing reporter.
 
 For offline delivery, add `--queue-offline` when connecting. The next connected check or `python -m tokensand_pytest sync` retries counts for up to seven days. Run `python -m tokensand_pytest disconnect` to stop reporting from this checkout and discard its pending counts. A new checkout needs its own connection.
 
