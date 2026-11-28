@@ -153,11 +153,19 @@ The reviewer runs pytest once per checkout. It holds unexpected passes, skipped 
 To see why a case failed on that run, save its original pytest message. The report includes full case IDs and may contain private assertion values. Keep it outside the repository. If your CI already saved JUnit XML, read the failed case there directly.
 
 ```sh
-review_dir="$(mktemp -d)"
-python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_pytest.py" --run --before-root ../earlier-service --failure-report "$review_dir/failures.json" tests/test_workflow.py
+review_dir="$(mktemp -d "${TMPDIR:-/tmp}/tokensand-review.XXXXXX")" && (
+  umask 077
+  review_exit=0
+  python3 "$HOME/.agents/skills/tokensand-agent-pack/scripts/review_pytest.py" --run --before-root ../earlier-service --failure-report "$review_dir/failures.json" tests/test_workflow.py > "$review_dir/verdict.txt" 2>&1 || review_exit=$?
+  cat "$review_dir/verdict.txt"
+  printf 'Review files: %s\n' "$review_dir" >&2
+  exit "$review_exit"
+)
 ```
 
 The file groups failures by checkout and pytest phase. Each side keeps up to 100 messages and marks any omissions or truncation. The terminal summary keeps its existing redaction.
+
+For an authorized teammate, keep **both** files from that run: `verdict.txt` explains the decision and changed controls; `failures.json` explains the original failure. Exit 1 means the pair is unavailable; read the setup error first. Empty candidate diagnostics alone do not prove a repair. Ask: **“Read this saved review, name the blocking case and any changed controls, and say whether a recovery was recorded.”** These are recorded results, not a fresh check of current code. Include the exact checkout identities and test selection separately; rerun if that pairing is uncertain. A green-to-green result records passing checks without an observed repair. Keep the private files out of public project posts and PR summaries.
 
 The reviewer checks each case’s test definition, its active checkout-local fixtures, ancestor `conftest.py` files and pytest configuration. Switching a case from the real implementation to a test double holds the review when it changes the fixture definition used. An edit anywhere in an exercised fixture file also holds it. Declare other assertion helpers and data files with `--test-source PATH`.
 
